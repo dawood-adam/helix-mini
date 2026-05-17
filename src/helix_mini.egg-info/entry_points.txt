@@ -1,2 +1,0 @@
-[console_scripts]
-helix-mini = helix_mini.cli:cli
