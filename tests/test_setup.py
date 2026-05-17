@@ -87,7 +87,9 @@ class TestDockerSandbox:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)  # type: ignore[attr-defined]
         args = _collect_env_vars()
         assert "-e" in args
-        assert "ANTHROPIC_API_KEY=sk-test" in args
+        # Only the var NAME should appear, never the value (security fix)
+        assert "ANTHROPIC_API_KEY" in args
+        assert "sk-test" not in " ".join(args)
 
     def test_collect_env_vars_empty(self, monkeypatch: object):
         for info in PROVIDERS.values():

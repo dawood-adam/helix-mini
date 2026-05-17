@@ -74,13 +74,18 @@ def _build_image() -> None:
 
 
 def _collect_env_vars() -> list[str]:
-    """Collect API key environment variables to pass into the container."""
+    """Collect API key environment variables to pass into the container.
+
+    Uses ``-e VAR_NAME`` (without ``=VALUE``) so Docker inherits
+    from the host environment.  This keeps secrets out of the
+    process argument list (visible in ``/proc/<pid>/cmdline``)
+    and out of any log line that prints the command.
+    """
     env_args: list[str] = []
     for info in PROVIDERS.values():
         var = info["env_var"]
-        val = os.environ.get(var)
-        if val:
-            env_args.extend(["-e", f"{var}={val}"])
+        if os.environ.get(var):
+            env_args.extend(["-e", var])
     return env_args
 
 
@@ -118,7 +123,8 @@ def run_sandboxed(
         cmd.extend(["-v", f"{abs_path}:{container_path}:ro"])
         container_folders.append(container_path)
 
-    cmd.extend(_collect_env_vars())
+    env_args = _collect_env_vars()
+    env_count = len(env_args) // 2  # each var is ["-e", "VAR_NAME"]
 
     cmd.append(DOCKER_IMAGE)
     cmd.append("run")
@@ -128,7 +134,14 @@ def run_sandboxed(
         cmd.extend(["-q", question])
     cmd.extend(container_folders)
 
-    log.info("Launching sandbox: %s", " ".join(cmd))
+    # Log the command without env-var args to avoid leaking secrets.
+    log.info("Launching sandbox (%d env vars): %s", env_count, " ".join(cmd))
+
+    # Insert env args right before the image name for the actual execution.
+    image_idx = cmd.index(DOCKER_IMAGE)
+    for i, arg in enumerate(env_args):
+        cmd.insert(image_idx + i, arg)
+
     result = subprocess.run(cmd)
 
     if result.returncode != 0:
