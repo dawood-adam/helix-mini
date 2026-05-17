@@ -27,12 +27,13 @@ class ForgeState:
     next_action: str = ""
     cost_so_far: float = 0.0
     cost_cap: float = 5.0
+    call_cap: int = 0
     current_stage: str = "start"
     completed_stages: list[str] = field(default_factory=list)
     error: str | None = None
 ```
 
-All data flowing through the pipeline. Each agent reads from and writes to subsets of these fields. The `autonomy` dict maps gate names to `"auto"` or `"always_ask"`.
+All data flowing through the pipeline. Each agent reads from and writes to subsets of these fields. The `autonomy` dict maps gate names to `"auto"` or `"always_ask"`. `call_cap` is the fallback guardrail: `0` means the dollar `cost_cap` governs; a positive value (set from `ModelConfig.call_cap()` in the runner) caps LLM-backed nodes per run when the engine doesn't report cost.
 
 ---
 
@@ -174,7 +175,7 @@ class CostCapExceeded(Exception):
     """Raised when cumulative LLM cost exceeds the configured cap."""
 ```
 
-Checked before each LLM-calling node (scout, critic_methods, planner, builder, critic_results).
+`_check_caps()` runs before each LLM-calling node (scout, critic_methods, planner, builder, critic_results) and raises `CostCapExceeded` when either the dollar `cost_cap` is hit **or**, when `call_cap` is active (engine doesn't report cost), the count of completed `LLM_STAGES` reaches `call_cap`.
 
 ---
 

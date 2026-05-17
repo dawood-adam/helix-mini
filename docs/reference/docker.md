@@ -35,7 +35,7 @@ def run_sandboxed(
 | Privileges | `--security-opt no-new-privileges` |
 | Memory | 2 GB limit |
 | CPUs | 2 |
-| API keys | Passed via `-e VAR_NAME` (Docker inherits from host; values never appear in process args or logs) |
+| Auth env | API keys **and** `CLAUDE_CODE_OAUTH_TOKEN` passed via `-e VAR_NAME` (Docker inherits from host; values never appear in process args or logs) so the `cli/claude` engine works sandboxed |
 
 **Example:**
 ```python

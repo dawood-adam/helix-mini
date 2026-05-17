@@ -52,6 +52,7 @@ def run_project(
         "next_action": "",
         "cost_so_far": 0.0,
         "cost_cap": 5.0,
+        "call_cap": model_config.call_cap(),
         "current_stage": "start",
         "completed_stages": [],
         "error": None,

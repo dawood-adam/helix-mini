@@ -6,7 +6,7 @@ Run the pipeline on multiple folders simultaneously, with all projects sharing a
 
 ## Prerequisites
 
-- helix-mini installed with an API key configured
+- helix-mini installed with an API key, a Claude subscription token, or Ollama configured
 - Two or more input folders with source material
 
 ## Steps
@@ -57,7 +57,7 @@ helix-mini atlas search "simulation"
 - Multiple folders are run via `asyncio.gather()` in a thread pool executor.
 - All pipelines share one `Atlas` instance. The `Atlas.write()` method uses a `threading.Lock` to ensure writes are atomic.
 - Each project gets its own decision log and snapshots under `~/.helix-mini/atlas/projects/<name>/`.
-- The cost cap ($5.00) applies per project, not globally.
+- The cost cap ($5.00) applies per project, not globally. The same resolved engine (API, subscription `--cli claude`, or `--local`) is used for every parallel pipeline.
 
 ## Variations
 

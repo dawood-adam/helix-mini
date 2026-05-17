@@ -7,7 +7,7 @@ Run the full 6-agent research pipeline on a single folder of source material wit
 ## Prerequisites
 
 - helix-mini installed (`pip install -e .`)
-- An API key configured (`helix-mini setup` or `export ANTHROPIC_API_KEY=...`)
+- One of: an API key (`helix-mini setup` / `export ANTHROPIC_API_KEY=...`), a Claude subscription token (`claude setup-token` → `export CLAUDE_CODE_OAUTH_TOKEN=...`), or Ollama for `--local`
 
 ## Steps
 
@@ -93,5 +93,6 @@ The Atlas wiki at `~/.helix-mini/atlas/` contains:
 ## Variations
 
 - **Without `--lightspeed`**: Uses the default model (Claude Sonnet, more capable but more expensive). Without `--lightspeed`, gates are set to `always_ask` mode, but currently auto-proceed since interactive gate prompts are not yet implemented.
+- **Engine selection**: With no engine flag, helix-mini resolves the engine by **OAuth-wins** precedence — a `CLAUDE_CODE_OAUTH_TOKEN` runs this on your Claude subscription (no API key), else the API path. Add `--cli claude` to force the subscription engine, or `--local` for Qwen. See [Claude Subscription / CLI Engine](claude-cli-engine.md).
 - **With `-v` (verbose)**: Enables DEBUG logging for troubleshooting: `helix-mini -v run ./cardiac-research --lightspeed`
-- **Custom cost cap**: The default budget is $5.00 per pipeline run. This is currently not configurable via CLI.
+- **Budget caps**: The default budget is $5.00 per run (not configurable via CLI). For CLI engines that don't report cost, a per-run call-count cap (24 LLM nodes) is armed instead.

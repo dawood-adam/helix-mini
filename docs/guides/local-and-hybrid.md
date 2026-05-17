@@ -73,6 +73,18 @@ When `--lightspeed` is combined with `--local-recommended`, the cloud stages use
 helix-mini run ./my-folder --local-recommended --model-size small --lightspeed
 ```
 
+## Another no-API-key option: Claude subscription
+
+If you have a Claude plan, `--cli claude` runs every stage through the `claude`
+CLI on your **subscription** rate limits — no API key, no local model:
+
+```bash
+claude setup-token && export CLAUDE_CODE_OAUTH_TOKEN="..."
+helix-mini run ./my-folder --cli claude --lightspeed
+```
+
+See [Claude Subscription / CLI Engine](claude-cli-engine.md).
+
 ## Variations
 
 - **Without `--lightspeed`**: The model selection is the same, but gates are set to `always_ask` mode.

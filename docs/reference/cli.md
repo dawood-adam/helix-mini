@@ -37,8 +37,10 @@ helix-mini run [OPTIONS] FOLDERS...
 | `--local` | flag | off | All stages use local Qwen via Ollama |
 | `--local-recommended` | flag | off | Simple stages local, critical stages cloud |
 | `--model-size` | choice | `None` | Qwen model size: `small`, `medium`, `large` |
+| `--cli` | text | `None` | Pilot the pipeline through an LLM CLI engine (e.g. `claude`) |
+| `--cli-model` | text | `None` | Engine-native model for `--cli` (e.g. `haiku`, `opus`) |
 
-**Mutually exclusive modes:** `--local` and `--local-recommended` cannot be combined. Both require Ollama. `--local-recommended` also requires an API key for cloud stages.
+**Engine resolution:** Explicit `--cli` / `--local` / `--local-recommended` win. With no engine flag, `ModelConfig.default()` decides with **OAuth-wins** precedence: if `CLAUDE_CODE_OAUTH_TOKEN` is set, `run` uses `cli/claude` on your Claude subscription (no API key, even if one is set); else the litellm API path; else a friendly error pointing at `claude setup-token`, `helix-mini setup`, or `--local`. `--cli claude` needs only the `claude` binary on PATH. `--local`/`--local-recommended` require Ollama; `--local-recommended` also needs an API key for cloud stages.
 
 **Output:**
 ```
@@ -50,6 +52,33 @@ Helix Mini — 1 folder(s), mode=lightspeed
 --- Results ---
   my-folder: done (stages: 7, cost: $0.0089)
 ```
+
+---
+
+## `helix-mini agent`
+
+Drive helix-mini conversationally via the **Claude Agent SDK**.
+
+```
+helix-mini agent [OPTIONS] [PROMPT]
+```
+
+**Arguments:**
+- `PROMPT` (optional) — One-shot request. Omit for an interactive session.
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--max-turns` | int | `30` | Max agent turns before the session stops |
+
+helix-mini ops are exposed as in-process MCP tools: `atlas_search`,
+`atlas_status`, `decision_log` (auto-approved, read-only) and `run_pipeline`
+(expensive — gated by a terminal confirmation; denied non-interactively). The
+command clears the nested-session guard so it works inside Claude Code, and
+prefers subscription auth when `CLAUDE_CODE_OAUTH_TOKEN` is set. Requires the
+optional extra: `pip install 'helix-mini[agent]'` (a clear error is shown if
+the SDK is missing). See [agent_sdk](agent_sdk.md).
 
 ---
 

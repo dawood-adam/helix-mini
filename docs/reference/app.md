@@ -47,7 +47,7 @@ def run(
 - `lightspeed` (`bool`, default: `False`) — If `True`, all gates auto-proceed and the cheaper model is used.
 - `research_question` (`str`, default: `""`) — Guides the scout agent's analysis. Falls back to "General analysis" if empty.
 - `progress_fn` (`Callable[[str, str, float], None] | None`) — Called at each pipeline stage with `(stage_name, project_name, cost_so_far)`.
-- `model_config` (`ModelConfig | None`) — Override model selection. If `None`, loads from `config.toml` using the `lightspeed` flag.
+- `model_config` (`ModelConfig | None`) — Override model selection. If `None`, resolves via `ModelConfig.default(lightspeed)` (OAuth/subscription wins, then API key), falling back to `ModelConfig.load(lightspeed)`.
 
 **Returns:** `list[ForgeState]` — One result per folder. Each `ForgeState` contains `current_stage`, `completed_stages`, `cost_so_far`, `error`, and all agent outputs.
 

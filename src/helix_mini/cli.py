@@ -51,6 +51,15 @@ def cli(verbose: bool) -> None:
     default=None,
     help="Qwen model size for local inference (small/medium/large)",
 )
+@click.option(
+    "--cli", "cli_engine", default=None, metavar="ENGINE",
+    help="Pilot the pipeline through an LLM CLI (e.g. 'claude'). No API key "
+    "needed; the CLI handles its own auth. Define more in config.toml.",
+)
+@click.option(
+    "--cli-model", "cli_model", default=None, metavar="MODEL",
+    help="Engine-native model for --cli (e.g. 'opus', 'sonnet', 'haiku').",
+)
 def run(
     folders: tuple[str, ...],
     lightspeed: bool,
@@ -59,10 +68,29 @@ def run(
     local: bool,
     local_recommended: bool,
     model_size: str | None,
+    cli_engine: str | None,
+    cli_model: str | None,
 ) -> None:
     """Run Forge pipeline on one or more folders."""
     # Resolve model config based on flags
-    if local or local_recommended:
+    if cli_engine:
+        from .llm_cli import CLIEngineError, get_engine
+
+        try:
+            eng = get_engine(cli_engine)
+        except CLIEngineError as e:
+            click.echo(str(e), err=True)
+            sys.exit(1)
+        if not eng.available():
+            click.echo(
+                f"CLI engine '{cli_engine}' is not on PATH (looked for "
+                f"'{eng.bin}'). Install it first.",
+                err=True,
+            )
+            sys.exit(1)
+        model_config = ModelConfig.cli(cli_engine, native_model=cli_model)
+        mode_label = f"cli:{cli_engine}" + (f":{cli_model}" if cli_model else "")
+    elif local or local_recommended:
         size = model_size or "medium"
         if local:
             model_config = ModelConfig.local(size)
@@ -75,12 +103,32 @@ def run(
             model_config = ModelConfig.local_recommended(size, lightspeed=lightspeed)
             mode_label = f"local-recommended ({QWEN_SIZES[size]} + cloud)"
     else:
-        if not has_api_key():
-            click.echo("No API key found. Run 'helix-mini setup' first.")
-            click.echo("Or use --local to run entirely with a local Qwen model.")
+        model_config = ModelConfig.default(lightspeed=lightspeed)
+        if model_config is None:
+            click.echo("No Claude OAuth token or API key found.")
+            click.echo(
+                "Run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN "
+                "to use your Claude subscription,"
+            )
+            click.echo(
+                "or 'helix-mini setup' for an API key, or --local for a "
+                "local Qwen model."
+            )
             sys.exit(1)
-        model_config = ModelConfig.load(lightspeed=lightspeed)
-        mode_label = "lightspeed" if lightspeed else "normal"
+        if model_config.model.startswith("cli/"):
+            from .llm_cli import get_engine
+
+            if not get_engine("claude").available():
+                click.echo(
+                    "Claude CLI not found on PATH — reinstall Claude Code.",
+                    err=True,
+                )
+                sys.exit(1)
+            mode_label = "claude-subscription" + (
+                " lightspeed" if lightspeed else ""
+            )
+        else:
+            mode_label = "lightspeed" if lightspeed else "normal"
 
     folder_paths = [Path(f).resolve() for f in folders]
 
@@ -284,6 +332,41 @@ def init(name: str) -> None:
     click.echo(f"  1. Edit {name}/question.md with your research question")
     click.echo(f"  2. Add source files to {name}/")
     click.echo(f"  3. Run: helix-mini run ./{name} --lightspeed")
+
+
+@cli.command()
+@click.argument("prompt", required=False)
+@click.option(
+    "--max-turns", default=30, show_default=True,
+    help="Max agent turns before the session stops",
+)
+def agent(prompt: str | None, max_turns: int) -> None:
+    """Drive helix-mini conversationally via a Claude agent (Agent SDK).
+
+    With PROMPT, runs one-shot; without it, opens an interactive session.
+    The agent can search the Atlas and (with confirmation) run the pipeline.
+    Needs the optional extra: pip install 'helix-mini[agent]'
+
+    Auth: set CLAUDE_CODE_OAUTH_TOKEN ('claude setup-token') to run on your
+    Claude subscription rate limits instead of API billing.
+    """
+    # The Agent SDK spawns its bundled `claude` CLI; clear the nested-session
+    # guard so this works even when launched from Claude Code.
+    from .config import CLAUDE_NESTED_GUARD_VARS
+
+    for _v in CLAUDE_NESTED_GUARD_VARS:
+        os.environ.pop(_v, None)
+
+    from .agent_sdk import run_agent
+
+    try:
+        run_agent(prompt, max_turns=max_turns)
+    except RuntimeError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo("\nInterrupted.", err=True)
+        sys.exit(130)
 
 
 if __name__ == "__main__":

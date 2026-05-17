@@ -74,16 +74,18 @@ def _build_image() -> None:
 
 
 def _collect_env_vars() -> list[str]:
-    """Collect API key environment variables to pass into the container.
+    """Forward auth env vars by NAME (``-e VAR``, not ``-e VAR=VALUE``).
 
-    Uses ``-e VAR_NAME`` (without ``=VALUE``) so Docker inherits
-    from the host environment.  This keeps secrets out of the
-    process argument list (visible in ``/proc/<pid>/cmdline``)
-    and out of any log line that prints the command.
+    Docker reads each value from its own (inherited) environment, so the
+    secret value never enters this process's argv or any log line.
     """
+    from .config import CLAUDE_CODE_OAUTH_ENV
+
     env_args: list[str] = []
-    for info in PROVIDERS.values():
-        var = info["env_var"]
+    vars_to_pass = [info["env_var"] for info in PROVIDERS.values()]
+    # Subscription auth for the cli/claude engine inside the sandbox.
+    vars_to_pass.append(CLAUDE_CODE_OAUTH_ENV)
+    for var in vars_to_pass:
         if os.environ.get(var):
             env_args.extend(["-e", var])
     return env_args
@@ -124,25 +126,22 @@ def run_sandboxed(
         container_folders.append(container_path)
 
     env_args = _collect_env_vars()
-    env_count = len(env_args) // 2  # each var is ["-e", "VAR_NAME"]
 
-    cmd.append(DOCKER_IMAGE)
-    cmd.append("run")
+    tail = [DOCKER_IMAGE, "run"]
     if lightspeed:
-        cmd.append("--lightspeed")
+        tail.append("--lightspeed")
     if question:
-        cmd.extend(["-q", question])
-    cmd.extend(container_folders)
+        tail.extend(["-q", question])
+    tail.extend(container_folders)
 
-    # Log the command without env-var args to avoid leaking secrets.
-    log.info("Launching sandbox (%d env vars): %s", env_count, " ".join(cmd))
-
-    # Insert env args right before the image name for the actual execution.
-    image_idx = cmd.index(DOCKER_IMAGE)
-    for i, arg in enumerate(env_args):
-        cmd.insert(image_idx + i, arg)
-
-    result = subprocess.run(cmd)
+    # Log without the env args. They are name-only (no secret values), but the
+    # logged command omits them entirely as defense-in-depth.
+    log.info(
+        "Launching sandbox: %s (forwarding %d auth env var(s))",
+        " ".join(cmd + tail),
+        len(env_args) // 2,
+    )
+    result = subprocess.run(cmd + env_args + tail)
 
     if result.returncode != 0:
         raise RuntimeError(f"Sandbox exited with code {result.returncode}")

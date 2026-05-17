@@ -27,6 +27,18 @@ DEFAULT_CONFIG = {
 }
 
 
+def load_config_toml(home: Path | None = None) -> dict:
+    """Parse ``<home>/config.toml``; return {} if absent or unreadable."""
+    path = (home or HELIX_HOME) / "config.toml"
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def ensure_config(home: Path | None = None) -> Path:
     """Create default config.toml if it doesn't exist. Returns path."""
     home = home or HELIX_HOME

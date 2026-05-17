@@ -33,7 +33,9 @@ class HelixMini:
     ) -> list[ForgeState]:
         """Run Forge pipelines on one or more folders."""
         if model_config is None:
-            model_config = ModelConfig.load(lightspeed=lightspeed)
+            model_config = ModelConfig.default(lightspeed=lightspeed) or ModelConfig.load(
+                lightspeed=lightspeed
+            )
         mode = "lightspeed" if lightspeed else "normal"
         log.info(
             "Helix Mini — %d folder(s), mode=%s, model=%s",

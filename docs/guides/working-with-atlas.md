@@ -107,7 +107,21 @@ cat ~/.helix-mini/atlas/projects/cardiac-sim/.snapshots/snap-1.json | python -m 
 Each snapshot contains:
 - `timestamp` — When the snapshot was taken
 - `stage` — Pipeline stage at the time
-- `state` — Full `ForgeState` as a dict (all 19 fields)
+- `state` — Full `ForgeState` as a dict (all 20 fields)
+
+## Exploring the Atlas Conversationally
+
+Instead of `status` / `atlas search` / `log`, you can ask a Claude agent
+(requires `pip install '.[agent]'`):
+
+```bash
+helix-mini agent "what do we know about cardiac modeling? show the decision log"
+helix-mini agent          # interactive session
+```
+
+The agent uses read-only Atlas tools automatically; launching a new pipeline
+run from the agent requires explicit terminal confirmation. See
+[Driving helix-mini with a Claude Agent](claude-agent.md).
 
 ## How the Atlas Compounds
 

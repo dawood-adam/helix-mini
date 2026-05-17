@@ -8,7 +8,7 @@ Run the pipeline in an isolated Docker container for enhanced security. This is 
 
 - helix-mini installed
 - [Docker](https://docs.docker.com/get-docker/) installed and running
-- An API key configured
+- An API key or `CLAUDE_CODE_OAUTH_TOKEN` configured (both are forwarded into the container)
 
 ## Steps
 
@@ -44,14 +44,14 @@ helix-mini run ./my-folder --sandbox --lightspeed -q "How to model cardiac flow?
 | **Memory** | 2 GB limit |
 | **CPUs** | 2 cores |
 | **Privileges** | `--security-opt no-new-privileges` |
-| **API keys** | Passed via `-e VAR_NAME` — Docker inherits from host environment. Values never appear in process arguments or logs. |
+| **Auth env** | API keys **and** `CLAUDE_CODE_OAUTH_TOKEN` passed via `-e VAR_NAME` — Docker inherits from host. Values never appear in process arguments or logs. |
 
 ## How It Works
 
 1. `helix-mini` builds a Docker image (`helix-mini-sandbox`) from the project's `Dockerfile` using `python:3.13-slim`.
 2. Your input folders are mounted read-only inside the container.
 3. `~/.helix-mini` is mounted read-write so Atlas data persists after the container exits.
-4. API keys are inherited from your host environment — the key values are never written to the Docker command line.
+4. API keys **and** `CLAUDE_CODE_OAUTH_TOKEN` are inherited from your host environment — values are never written to the Docker command line. (The `--cli claude` engine additionally needs the `claude` binary present in the image.)
 5. The pipeline runs inside the container as user `helix`, and the container is removed (`--rm`) after completion.
 
 ## Variations

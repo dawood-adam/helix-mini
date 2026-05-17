@@ -32,7 +32,7 @@ Atlas is the LLM Wiki pattern reduced to its simplest viable form:
 │   ├── entities/             # People, datasets, tools, orgs
 │   └── projects/             # One page per Forge project run
 ├── raw/                      # IMMUTABLE SOURCES (copies/symlinks of input files)
-└── config.toml               # Model config + API key env var name
+└── config.toml               # Model profiles + optional [cli.<name>] engines
 ```
 
 ### How it works
@@ -116,9 +116,9 @@ helix-mini/
 │       │
 │       ├── config/                     # Configuration management
 │       │   ├── __init__.py             # Re-exports all config symbols
-│       │   ├── settings.py             # HELIX_HOME, .env loading, ensure_config
-│       │   ├── models.py              # ModelConfig, QWEN_SIZES, stage mappings
-│       │   └── providers.py           # Provider registry, API key validation
+│       │   ├── settings.py             # HELIX_HOME, .env, ensure_config, load_config_toml
+│       │   ├── models.py              # ModelConfig (load/local/cli/default), stage maps
+│       │   └── providers.py           # API keys, OAuth token, claude_subprocess_env
 │       │
 │       ├── atlas/                      # LLM wiki system
 │       │   ├── __init__.py             # Re-exports Atlas, Page, PageWrite, ingest_folder
@@ -136,10 +136,12 @@ helix-mini/
 │       │   └── snapshots.py          # Lightweight state snapshots
 │       │
 │       ├── sandbox.py                  # LLM output validation (paths, content, batch limits)
-│       ├── llm.py                      # Thin LLM call wrapper (litellm)
+│       ├── llm.py                      # Thin LLM wrapper (litellm; routes cli/ to llm_cli)
+│       ├── llm_cli.py                  # CLI-backed LLM engine (cli/claude + registry)
+│       ├── agent_sdk.py                # Claude Agent SDK driver (helix tools as MCP)
 │       ├── docker.py                   # Docker sandbox execution
 │       ├── app.py                      # Facade: Atlas + config + runner
-│       └── cli.py                      # CLI commands (run, setup, status, log, init)
+│       └── cli.py                      # CLI commands (run, agent, setup, status, log, init)
 │
 └── tests/
     ├── conftest.py                     # Shared fixtures
@@ -147,17 +149,20 @@ helix-mini/
     ├── test_lightspeed.py              # Agent + full pipeline tests with fake LLM
     ├── test_sandbox.py                 # Output validation tests
     ├── test_setup.py                   # Config, model, provider tests
-    └── test_workflow.py                # Router, decisions, snapshots, state tests
+    ├── test_workflow.py                # Router, decisions, snapshots, state tests
+    ├── test_llm_cli.py                 # CLI engine: registry, exec, routing, caps
+    ├── test_agent_sdk.py               # Agent SDK tools + permission gate (SDK-free)
+    └── test_oauth_auth.py              # OAuth precedence across run/agent/engine
 ```
 
-**3 packages + 5 top-level modules, ~1800 lines, 66 tests.**
+**3 packages + 7 top-level modules, ~2,900 lines, 123 tests.**
 
 ### Module organization principles
 
 - **`config/`** — "How is Helix Mini configured?" Settings, model selection, provider registry. All config in one place.
 - **`atlas/`** — "How does the wiki work?" Store (read/write/index) separated from ingestion (file reading/copying).
 - **`pipeline/`** — "How does the research pipeline run?" State, agents, routing, graph, execution, logging — all pipeline concerns grouped together.
-- **Top-level utilities** — Small, focused modules that serve the whole codebase: `sandbox.py` (security), `llm.py` (LLM calls), `docker.py` (containerization), `app.py` (facade), `cli.py` (entry point).
+- **Top-level utilities** — Small, focused modules that serve the whole codebase: `sandbox.py` (security), `llm.py` (LLM calls), `llm_cli.py` (Claude-CLI inference backend), `agent_sdk.py` (Claude Agent SDK driver), `docker.py` (containerization), `app.py` (facade), `cli.py` (entry point). `llm_cli.py` and `agent_sdk.py` are alternate Claude backends behind the *same* pipeline — they add ways to power/drive helix-mini, not a forked code path.
 
 ---
 
@@ -189,6 +194,39 @@ helix-mini/
 - Runs the entire pipeline inside a Docker container
 - Non-root user, read-only source mounts, resource limits
 - Security: `--security-opt no-new-privileges`, 2GB memory, 2 CPUs
+- The OAuth token is forwarded into the container so the cli engine works sandboxed
+
+### 6. CLI Engine Mode (`--cli claude [--cli-model haiku]`)
+- Pilots every pipeline stage through an LLM **CLI** instead of the litellm HTTP API
+- `claude` is the built-in engine; more engines are added by a `[cli.<name>]`
+  block in `config.toml` — no code change (declarative `CLIEngine` registry)
+- No API key required: the `claude` binary handles its own auth
+- Claude's headless JSON reports real `total_cost_usd`, so the cost cap still
+  works; engines that don't report cost fall back to a per-run **call-count cap**
+- Strips the nested-session guard so it runs even inside Claude Code
+
+### 7. Agent Mode (`helix-mini agent [PROMPT]`)
+- Drives helix-mini conversationally via the **Claude Agent SDK**
+- helix-mini ops are exposed as in-process MCP tools: `atlas_search`,
+  `atlas_status`, `decision_log` (auto-approved, read-only) and `run_pipeline`
+  (expensive — human-gated via a `can_use_tool` confirmation)
+- One-shot with `PROMPT`, interactive without it
+- Optional extra: `pip install 'helix-mini[agent]'`
+
+### Auth & default resolution
+
+`ModelConfig.default()` picks the engine when no mode flag is given, with a
+strict precedence (**OAuth wins**):
+
+1. `CLAUDE_CODE_OAUTH_TOKEN` set (`claude setup-token`) → `cli/claude` on your
+   Claude **subscription** rate limits — even if an API key is also set, so a
+   stray key can't silently switch to pay-per-token billing
+2. else an API key is set → litellm path (`ModelConfig.load`)
+3. else → friendly error (or `cli/claude` fallback when launched from the agent)
+
+Explicit `--cli` / `--local` / `--local-recommended` flags always override the
+default. The same precedence governs `helix-mini run`, `helix-mini agent`, and
+programmatic `HelixMini.run()`.
 
 ---
 
@@ -201,6 +239,7 @@ helix-mini/
 HELIX_HOME = Path("~/.helix-mini")     # Base directory
 DEFAULT_CONFIG = {...}                   # Default model mappings
 def ensure_config() -> Path: ...         # Create config.toml if missing
+def load_config_toml(home) -> dict       # Single shared TOML reader
 
 # config/models.py
 @dataclass
@@ -208,16 +247,30 @@ class ModelConfig:
     model: str
     stage_overrides: dict[str, str]      # Per-stage model selection
     def model_for_stage(stage) -> str    # Resolve model for a pipeline stage
+    def call_cap() -> int                # Fallback cap when cost unreported
     @classmethod def load(lightspeed)    # Load from config.toml
     @classmethod def local(size)         # All-local Qwen config
     @classmethod def local_recommended() # Hybrid local/cloud config
+    @classmethod def cli(engine, model)  # Pilot via a CLI engine (cli/claude)
+    @classmethod def default(lightspeed) # Precedence resolver (OAuth wins)
 
 # config/providers.py
 PROVIDERS = {"anthropic": ..., "openai": ...}
+CLAUDE_CODE_OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+CLAUDE_NESTED_GUARD_VARS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 def has_api_key() -> bool
+def claude_code_oauth_token() -> str | None      # `claude setup-token`
+def has_claude_code_oauth() -> bool
+def claude_subprocess_env(strip, prefer_oauth)   # Child env for spawning claude
 def validate_api_key(provider, key) -> bool
 def validate_ollama(model) -> bool
 ```
+
+`claude_subprocess_env()` is the single home for "spawning `claude`" env rules:
+it strips the nested-session guard vars (+ any extra) and, when `prefer_oauth`
+and a token is set, drops `ANTHROPIC_API_KEY` so subscription auth wins. Both
+`llm_cli.py` and (via `agent_sdk.claude_code_auth`) the Agent SDK path consume
+it, so the precedence rule lives in exactly one place.
 
 ### `atlas/` — The LLM Wiki
 
@@ -300,7 +353,51 @@ def call_llm(model, system, user, ...) -> LLMResponse     # Single call with ret
 def call_llm_json(model, system, user, ...) -> (dict, float)  # JSON-parsed response
 ```
 
-Uses `litellm` for provider routing. Timeout: 120s, retries: 3.
+Uses `litellm` for provider routing. Timeout: 120s, retries: 3. A `cli/`-prefixed
+model short-circuits to `llm_cli.call_cli_llm` before litellm is touched — the
+entire pipeline is engine-agnostic because everything funnels through here.
+
+### `llm_cli.py` — CLI-Backed LLM Engine
+
+```python
+@dataclass
+class CLIEngine:                       # Declarative: bin, args, prompt/output
+    ...                                # shape, model/system flags, cost paths
+CLAUDE = CLIEngine(name="claude", ...)  # The built-in reference engine
+
+def call_cli_llm(model, system, user, ...) -> LLMResponse  # Spawn the CLI
+@lru_cache def _load_config_engines() -> dict[str, CLIEngine]  # [cli.x] blocks
+def get_engine(name) -> CLIEngine                          # Built-ins win
+def call_cap_for(model, stage_models) -> int               # 0 if cost reported
+```
+
+A `cli/<engine>[:<model>]` model is run by spawning the engine's binary in
+headless mode (Claude: `claude -p --output-format json --max-turns 1`, prompt
+via stdin, system via `--append-system-prompt`). Output is parsed via the
+engine's declarative JSON paths (Claude's `result`/`total_cost_usd`/`usage`/
+`is_error`). The child env comes from `claude_subprocess_env()`. Config-defined
+engines are memoized once per process. When an engine doesn't report dollar
+cost, `call_cap_for` arms a per-run call-count cap (default 24) enforced in the
+graph (`_check_caps`) — the cost cap's fallback guardrail.
+
+### `agent_sdk.py` — Claude Agent SDK Driver
+
+```python
+# Pure, SDK-free, unit-tested directly:
+def atlas_search_text/atlas_status_text/decision_log_text/run_pipeline_text(...)
+def run_permission_decision(tool_name, *, interactive, approver) -> (bool, str)
+def claude_code_auth() -> (env_to_pass, env_keys_to_drop)   # OAuth for the SDK
+
+# SDK plumbing (lazy import of claude-agent-sdk):
+def build_helix_server(home)        # @tool wrappers + create_sdk_mcp_server
+def run_agent(prompt, home, turns)  # ClaudeSDKClient loop; can_use_tool gate
+```
+
+Exposes helix-mini as in-process MCP tools (`mcp__helix__*`). Read tools are
+auto-approved via `allowed_tools`; `run_pipeline` is intentionally omitted so it
+falls through to `can_use_tool`, which prompts for terminal confirmation and
+denies in non-interactive sessions. The module imports without the SDK so the
+pure helpers stay testable; `run_pipeline` reuses `ModelConfig.default()`.
 
 ### `docker.py` — Docker Sandbox
 
@@ -312,13 +409,18 @@ def run_sandboxed(folders, lightspeed, question) -> None
 ### `cli.py` — Commands
 
 ```
-helix-mini run <folder> [<folder>...] [--lightspeed] [--local] [--sandbox]
+helix-mini run <folder>... [--lightspeed] [--local|--local-recommended]
+                           [--cli claude [--cli-model haiku]] [--sandbox]
+helix-mini agent [PROMPT] [--max-turns N]  # Drive via the Claude Agent SDK
 helix-mini setup                    # Interactive provider + API key wizard
 helix-mini init <name>              # Create project folder with question.md
 helix-mini status                   # Show Atlas stats + recent projects
 helix-mini log <project>            # Print decision log
 helix-mini atlas search <query>     # Search the wiki
 ```
+
+With no engine flag, `run` resolves via `ModelConfig.default()` (OAuth → API
+key). `agent` clears the nested-session guard, then runs subscription-first.
 
 ---
 
@@ -408,11 +510,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["pymupdf>=1.24"]   # for PDF ingestion
+pdf = ["pymupdf>=1.24"]                  # PDF ingestion
+agent = ["claude-agent-sdk>=0.2,<0.3"]   # `helix-mini agent`
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 ```
 
-Four core deps. PDF support optional.
+Four core deps. PDF support and the Agent SDK are optional extras. The
+`--cli claude` engine needs only the `claude` binary on PATH (no Python dep).
 
 ---
 
@@ -434,6 +538,16 @@ Four core deps. PDF support optional.
 - `Atlas._safe_resolve()` validates all paths stay within atlas root
 - Defense-in-depth: sandbox validates before Atlas, Atlas validates again
 
+### Subprocess Auth (`claude_subprocess_env`)
+- OAuth-token presence forces subscription auth: `ANTHROPIC_API_KEY` is dropped
+  from the `claude` child env so a stray key can't silently bill the API
+- Scoped to the child only — parent process and litellm path are untouched
+- Nested-session guard vars are stripped so the CLI/SDK run inside Claude Code
+
+### Agent Tool Gating (`agent_sdk.py`)
+- Read tools auto-approved; the costly `run_pipeline` requires explicit
+  terminal confirmation and is denied in non-interactive sessions
+
 ---
 
 ## Design Principles
@@ -448,3 +562,5 @@ Four core deps. PDF support optional.
 8. **No fake success** — if the LLM fails, the pipeline pauses.
 9. **Modular packages** — config, atlas, pipeline are self-contained subsystems. Each can be understood independently.
 10. **Local-first option** — run entirely offline with Ollama + Qwen, or mix local and cloud models.
+11. **One LLM chokepoint** — every call funnels through `call_llm`, so the Claude CLI engine and Agent SDK are alternate backends behind the *same* pipeline, never a forked path.
+12. **Subscription as a first-class auth path** — `claude setup-token` powers `--cli claude` and `helix-mini agent` with no API key; OAuth wins precedence so a stray key never silently bills the API.

@@ -1,6 +1,6 @@
 # helix_mini.llm
 
-Thin wrapper around [litellm](https://github.com/BerriAI/litellm) for LLM calls with timeout, retry, and JSON parsing.
+Thin wrapper around [litellm](https://github.com/BerriAI/litellm) for LLM calls with timeout, retry, and JSON parsing. This is the single chokepoint every pipeline LLM call funnels through — which is why alternate Claude backends (the [llm_cli](llm_cli.md) engine, the [agent_sdk](agent_sdk.md) driver) plug in without a forked code path.
 
 ---
 
@@ -30,7 +30,7 @@ def call_llm(
 
 **Returns:** `LLMResponse` with `content`, `usage`, and `cost`.
 
-**Behavior:** Calls `litellm.completion()` with the given parameters. Cost is computed via `litellm.completion_cost()`.
+**Behavior:** A `cli/`-prefixed `model` short-circuits to `llm_cli.call_cli_llm()` (the CLI engine) before litellm is touched. Otherwise calls `litellm.completion()`; cost is computed via `litellm.completion_cost()`.
 
 ---
 
