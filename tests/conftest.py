@@ -11,6 +11,16 @@ import pytest
 from helix_mini.atlas import Atlas
 
 
+@pytest.fixture(autouse=True)
+def _clear_cli_engine_cache():
+    """`_load_config_engines` is process-memoized; reset it per test since
+    tests vary HELIX_HOME / config.toml."""
+    from helix_mini.llm_cli import _load_config_engines
+
+    _load_config_engines.cache_clear()
+    yield
+
+
 @pytest.fixture
 def tmp_atlas(tmp_path: Path) -> Atlas:
     """Create a temporary Atlas instance."""

@@ -32,6 +32,9 @@ class ForgeState:
     # Budget
     cost_so_far: float = 0.0
     cost_cap: float = 5.0
+    # Fallback guardrail: max LLM-backed nodes per run when the engine does
+    # not report dollar cost. 0 means inactive (the cost cap governs).
+    call_cap: int = 0
 
     # Stage tracking
     current_stage: str = "start"
@@ -58,6 +61,7 @@ class GraphState(TypedDict, total=False):
     next_action: str
     cost_so_far: float
     cost_cap: float
+    call_cap: int
     current_stage: str
     completed_stages: list[str]
     error: str | None

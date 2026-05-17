@@ -7,6 +7,7 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
+from ..config import LLM_STAGES
 from .agents import Agents
 from .decisions import append_decision, save_decisions_md
 from .router import gate_decision, sanity_route
@@ -20,12 +21,19 @@ class CostCapExceeded(Exception):
     """Raised when cumulative LLM cost exceeds the configured cap."""
 
 
-def _check_cost_cap(state):
-    """Raise if cost cap is exceeded."""
+def _check_caps(state):
+    """Raise if the cost cap, or the call-count fallback cap, is exceeded."""
     if state.cost_so_far >= state.cost_cap:
         raise CostCapExceeded(
             f"Cost cap reached: ${state.cost_so_far:.4f} >= ${state.cost_cap:.4f}"
         )
+    if state.call_cap:
+        used = sum(1 for st in state.completed_stages if st in LLM_STAGES)
+        if used >= state.call_cap:
+            raise CostCapExceeded(
+                f"LLM call cap reached: {used} >= {state.call_cap} "
+                f"(CLI engine does not report cost — using call-count guardrail)"
+            )
 
 
 def _project_dir(home: Path, project_name: str) -> Path:
@@ -47,7 +55,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def scout_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        _check_cost_cap(s)
+        _check_caps(s)
         _progress("scout", s.project_name, s.cost_so_far)
         result = agents.scout(s)
         if result.get("error"):
@@ -82,7 +90,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def critic_methods_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        _check_cost_cap(s)
+        _check_caps(s)
         _progress("critic-methods", s.project_name, s.cost_so_far)
         result = agents.critic_methods(s)
 
@@ -116,7 +124,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def planner_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        _check_cost_cap(s)
+        _check_caps(s)
         _progress("planner", s.project_name, s.cost_so_far)
         result = agents.planner(s)
 
@@ -148,7 +156,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def builder_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        _check_cost_cap(s)
+        _check_caps(s)
         _progress("builder", s.project_name, s.cost_so_far)
         result = agents.builder(s)
 
@@ -210,7 +218,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def critic_results_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        _check_cost_cap(s)
+        _check_caps(s)
         _progress("critic-results", s.project_name, s.cost_so_far)
         result = agents.critic_results(s)
 

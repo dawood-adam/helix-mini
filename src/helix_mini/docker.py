@@ -74,13 +74,20 @@ def _build_image() -> None:
 
 
 def _collect_env_vars() -> list[str]:
-    """Collect API key environment variables to pass into the container."""
+    """Forward auth env vars by NAME (``-e VAR``, not ``-e VAR=VALUE``).
+
+    Docker reads each value from its own (inherited) environment, so the
+    secret value never enters this process's argv or any log line.
+    """
+    from .config import CLAUDE_CODE_OAUTH_ENV
+
     env_args: list[str] = []
-    for info in PROVIDERS.values():
-        var = info["env_var"]
-        val = os.environ.get(var)
-        if val:
-            env_args.extend(["-e", f"{var}={val}"])
+    vars_to_pass = [info["env_var"] for info in PROVIDERS.values()]
+    # Subscription auth for the cli/claude engine inside the sandbox.
+    vars_to_pass.append(CLAUDE_CODE_OAUTH_ENV)
+    for var in vars_to_pass:
+        if os.environ.get(var):
+            env_args.extend(["-e", var])
     return env_args
 
 
@@ -118,18 +125,23 @@ def run_sandboxed(
         cmd.extend(["-v", f"{abs_path}:{container_path}:ro"])
         container_folders.append(container_path)
 
-    cmd.extend(_collect_env_vars())
+    env_args = _collect_env_vars()
 
-    cmd.append(DOCKER_IMAGE)
-    cmd.append("run")
+    tail = [DOCKER_IMAGE, "run"]
     if lightspeed:
-        cmd.append("--lightspeed")
+        tail.append("--lightspeed")
     if question:
-        cmd.extend(["-q", question])
-    cmd.extend(container_folders)
+        tail.extend(["-q", question])
+    tail.extend(container_folders)
 
-    log.info("Launching sandbox: %s", " ".join(cmd))
-    result = subprocess.run(cmd)
+    # Log without the env args. They are name-only (no secret values), but the
+    # logged command omits them entirely as defense-in-depth.
+    log.info(
+        "Launching sandbox: %s (forwarding %d auth env var(s))",
+        " ".join(cmd + tail),
+        len(env_args) // 2,
+    )
+    result = subprocess.run(cmd + env_args + tail)
 
     if result.returncode != 0:
         raise RuntimeError(f"Sandbox exited with code {result.returncode}")

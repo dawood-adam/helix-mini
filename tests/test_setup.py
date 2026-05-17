@@ -85,9 +85,11 @@ class TestDockerSandbox:
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # type: ignore[attr-defined]
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)  # type: ignore[attr-defined]
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)  # type: ignore[attr-defined]
         args = _collect_env_vars()
-        assert "-e" in args
-        assert "ANTHROPIC_API_KEY=sk-test" in args
+        # Name-only: the key value must never appear in the docker args.
+        assert args == ["-e", "ANTHROPIC_API_KEY"]
+        assert not any("sk-test" in a for a in args)
 
     def test_collect_env_vars_empty(self, monkeypatch: object):
         for info in PROVIDERS.values():

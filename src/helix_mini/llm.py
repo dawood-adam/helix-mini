@@ -37,6 +37,18 @@ def call_llm(
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> LLMResponse:
     """Make a single LLM call with timeout and retry protection."""
+    if model.startswith("cli/"):
+        from .llm_cli import call_cli_llm
+
+        return call_cli_llm(
+            model=model,
+            system=system,
+            user=user,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
     response = litellm.completion(
         model=model,
         messages=[
