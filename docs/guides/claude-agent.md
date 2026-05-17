@@ -10,16 +10,17 @@ in natural language.
 ## Prerequisites
 
 - helix-mini installed with the agent extra: `pip install -e '.[agent]'`
-- Auth for the bundled `claude` CLI — a Claude subscription token is
-  recommended: `claude setup-token` → `export CLAUDE_CODE_OAUTH_TOKEN=...`
+- Auth configured once in `~/.helix-mini/.env` — a Claude subscription token is
+  recommended (see [Getting Started](../getting-started.md#first-run-setup--pick-one)
+  or [Claude Subscription / CLI Engine](claude-cli-engine.md)).
 
 ## Steps
 
-### 1. One-shot
+### 1. One-shot — just type the request, no quotes
 
 ```bash
-helix-mini agent "what do we know about cardiac modeling?"
-helix-mini agent "run the pipeline on ./new-papers and summarize the verdict"
+helix-mini agent what do we know about cardiac modeling
+helix-mini agent run the pipeline on ./new-papers and summarize the verdict
 ```
 
 ### 2. Interactive

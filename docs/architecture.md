@@ -83,7 +83,7 @@ Same pipeline as Operation 1, but inference is served by spawning the CLI:
 3. `call_cli_llm` resolves the `CLAUDE` engine, builds the child env via `claude_subprocess_env()` (guard vars stripped; `ANTHROPIC_API_KEY` dropped when an OAuth token is set), and runs `claude -p --output-format json --max-turns 1`.
 4. Claude's JSON `result`/`total_cost_usd`/`usage`/`is_error` are parsed into an `LLMResponse`. Real cost keeps the dollar cap working; engines without cost arm `call_cap`.
 
-### Operation 5: `helix-mini agent [PROMPT]`
+### Operation 5: `helix-mini agent [PROMPT]...`
 
 helix-mini is *driven* by a Claude agent (Claude Agent SDK):
 

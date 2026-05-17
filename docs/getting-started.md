@@ -37,46 +37,40 @@ pip install -e ".[agent]"
 | `OPENAI_API_KEY` | OpenAI API authentication | — | Yes, if using OpenAI |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude **subscription** auth for `--cli claude` / `helix-mini agent` (mint with `claude setup-token`). Not an API key. **OAuth wins**: when set, takes precedence over `ANTHROPIC_API_KEY` for Claude runs. | — | No |
 
-Environment variables can be set in `~/.helix-mini/.env` (loaded first) or `.env` in the current directory (loaded second, takes precedence). The `helix-mini setup` command writes to `~/.helix-mini/.env` automatically.
+**helix-mini reads every credential from one file: `~/.helix-mini/.env`** (a
+`.env` in the current directory overrides it). Keep it private — `chmod 600`.
+There is no other place to configure auth; once it's set, every command just
+works with no `export`, no wrapper, and no quotes.
 
-## First-Run Setup
+## First-Run Setup — pick one
 
-**Option A: Interactive wizard** (recommended for cloud providers)
+### A. Claude subscription (recommended — no API key)
 
 ```bash
-helix-mini setup
+claude setup-token                                   # mint a token (one-time)
+mkdir -p ~/.helix-mini && chmod 700 ~/.helix-mini
+"${EDITOR:-nano}" ~/.helix-mini/.env                 # add one line:
+                                                     #   CLAUDE_CODE_OAUTH_TOKEN=<paste token>
+chmod 600 ~/.helix-mini/.env
 ```
 
-This will prompt you to pick a provider (Anthropic or OpenAI), enter your API key, validate it, and save it to `~/.helix-mini/.env`.
+Use an **editor** (not `echo`/`export`) so the token never lands in shell
+history or another process's environment, and `chmod 600` so only you can read
+it. That's the whole secure setup — `helix-mini run ./my-folder --lightspeed`
+now runs on your Claude plan. **OAuth wins:** a stray `ANTHROPIC_API_KEY` will
+not silently switch you to paid API billing.
 
-**Option B: Environment variable**
+### B. API key (Anthropic / OpenAI)
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+helix-mini setup        # wizard: pick provider, paste key, validates, writes ~/.helix-mini/.env
 ```
 
-**Option C: Local only** (no API key needed)
+### C. Local, fully offline (no account)
 
 ```bash
-# Pull a Qwen model via Ollama
 ollama pull qwen3:8b
-
-# Run fully local
 helix-mini run ./my-folder --local --lightspeed
-```
-
-**Option D: Claude subscription** (no API key — uses your Claude plan)
-
-```bash
-claude setup-token                       # mint a long-lived OAuth token
-export CLAUDE_CODE_OAUTH_TOKEN="..."     # (or add to ~/.helix-mini/.env)
-
-# With the token set, plain `run` auto-uses your subscription (OAuth wins):
-helix-mini run ./my-folder --lightspeed
-# Equivalent explicit form:
-helix-mini run ./my-folder --cli claude --lightspeed
-# Or drive it conversationally (needs the [agent] extra):
-helix-mini agent "search the atlas for cardiac modeling"
 ```
 
 ## Verify Installation
@@ -115,7 +109,7 @@ pytest
 
 Expected output:
 ```
-123 passed, 1 skipped in ~8s
+126 passed, 1 skipped in ~3s
 ```
 
 (The 1 skipped is a live Claude-CLI integration test, opt-in via `HELIX_CLI_IT=1`.)

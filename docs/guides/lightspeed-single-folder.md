@@ -7,7 +7,7 @@ Run the full 6-agent research pipeline on a single folder of source material wit
 ## Prerequisites
 
 - helix-mini installed (`pip install -e .`)
-- One of: an API key (`helix-mini setup` / `export ANTHROPIC_API_KEY=...`), a Claude subscription token (`claude setup-token` → `export CLAUDE_CODE_OAUTH_TOKEN=...`), or Ollama for `--local`
+- Auth configured once (see [Getting Started](../getting-started.md#first-run-setup--pick-one)): a Claude subscription token in `~/.helix-mini/.env`, an API key via `helix-mini setup`, or Ollama for `--local`
 
 ## Steps
 

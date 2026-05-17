@@ -334,21 +334,23 @@ def init(name: str) -> None:
     click.echo(f"  3. Run: helix-mini run ./{name} --lightspeed")
 
 
-@cli.command()
-@click.argument("prompt", required=False)
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.argument("prompt", nargs=-1)
 @click.option(
     "--max-turns", default=30, show_default=True,
     help="Max agent turns before the session stops",
 )
-def agent(prompt: str | None, max_turns: int) -> None:
-    """Drive helix-mini conversationally via a Claude agent (Agent SDK).
+def agent(prompt: tuple[str, ...], max_turns: int) -> None:
+    """Drive helix-mini conversationally via a Claude agent.
 
-    With PROMPT, runs one-shot; without it, opens an interactive session.
-    The agent can search the Atlas and (with confirmation) run the pipeline.
-    Needs the optional extra: pip install 'helix-mini[agent]'
+    Just type your request after `agent` — no quotes needed:
 
-    Auth: set CLAUDE_CODE_OAUTH_TOKEN ('claude setup-token') to run on your
-    Claude subscription rate limits instead of API billing.
+      helix-mini agent search the atlas for cardiac modeling
+
+    With no text, opens an interactive session. The agent can search the
+    Atlas and (with confirmation) run the pipeline. Needs the optional
+    extra: pip install 'helix-mini[agent]'. Auth: see the docs — set up a
+    Claude subscription token or an API key first.
     """
     # The Agent SDK spawns its bundled `claude` CLI; clear the nested-session
     # guard so this works even when launched from Claude Code.
@@ -360,7 +362,7 @@ def agent(prompt: str | None, max_turns: int) -> None:
     from .agent_sdk import run_agent
 
     try:
-        run_agent(prompt, max_turns=max_turns)
+        run_agent(" ".join(prompt) or None, max_turns=max_turns)
     except RuntimeError as e:
         click.echo(str(e), err=True)
         sys.exit(1)

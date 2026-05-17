@@ -205,18 +205,20 @@ helix-mini/
   works; engines that don't report cost fall back to a per-run **call-count cap**
 - Strips the nested-session guard so it runs even inside Claude Code
 
-### 7. Agent Mode (`helix-mini agent [PROMPT]`)
+### 7. Agent Mode (`helix-mini agent [PROMPT]...`)
 - Drives helix-mini conversationally via the **Claude Agent SDK**
 - helix-mini ops are exposed as in-process MCP tools: `atlas_search`,
   `atlas_status`, `decision_log` (auto-approved, read-only) and `run_pipeline`
   (expensive — human-gated via a `can_use_tool` confirmation)
-- One-shot with `PROMPT`, interactive without it
+- `PROMPT` is variadic — type the request unquoted (`helix-mini agent search
+  the atlas for X`); no text → interactive session
 - Optional extra: `pip install 'helix-mini[agent]'`
 
 ### Auth & default resolution
 
-`ModelConfig.default()` picks the engine when no mode flag is given, with a
-strict precedence (**OAuth wins**):
+Credentials live in one file, `~/.helix-mini/.env` (mode `600`), auto-loaded
+every run — no `export`/wrapper. `ModelConfig.default()` picks the engine when
+no mode flag is given, with a strict precedence (**OAuth wins**):
 
 1. `CLAUDE_CODE_OAUTH_TOKEN` set (`claude setup-token`) → `cli/claude` on your
    Claude **subscription** rate limits — even if an API key is also set, so a
@@ -411,7 +413,7 @@ def run_sandboxed(folders, lightspeed, question) -> None
 ```
 helix-mini run <folder>... [--lightspeed] [--local|--local-recommended]
                            [--cli claude [--cli-model haiku]] [--sandbox]
-helix-mini agent [PROMPT] [--max-turns N]  # Drive via the Claude Agent SDK
+helix-mini agent [PROMPT]... [--max-turns N]  # Conversational; unquoted text
 helix-mini setup                    # Interactive provider + API key wizard
 helix-mini init <name>              # Create project folder with question.md
 helix-mini status                   # Show Atlas stats + recent projects

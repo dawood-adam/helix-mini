@@ -14,15 +14,19 @@ key, by pointing every stage at the `claude` CLI (`cli/claude` engine). Same
 
 ## Steps
 
-### 1. Mint a subscription token
+### 1. Mint a subscription token (one-time, stored securely)
 
 ```bash
-claude setup-token
-export CLAUDE_CODE_OAUTH_TOKEN="..."        # or add to ~/.helix-mini/.env
+claude setup-token                                   # prints a token
+mkdir -p ~/.helix-mini && chmod 700 ~/.helix-mini
+"${EDITOR:-nano}" ~/.helix-mini/.env                 # add: CLAUDE_CODE_OAUTH_TOKEN=<paste token>
+chmod 600 ~/.helix-mini/.env
 ```
 
-This is **not** an API key — litellm/the HTTP API can't use it. It
-authenticates the bundled `claude` CLI against your Claude plan's rate limits.
+`~/.helix-mini/.env` is the one place helix-mini reads credentials from, every
+run — no `export`, no wrapper. Use an editor (not `echo`) so the token stays
+out of shell history. This is **not** an API key; it authenticates the bundled
+`claude` CLI against your Claude plan's rate limits.
 
 ### 2. Run
 

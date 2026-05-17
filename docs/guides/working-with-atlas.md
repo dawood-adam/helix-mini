@@ -115,9 +115,12 @@ Instead of `status` / `atlas search` / `log`, you can ask a Claude agent
 (requires `pip install '.[agent]'`):
 
 ```bash
-helix-mini agent "what do we know about cardiac modeling? show the decision log"
+helix-mini agent what do we know about cardiac modeling and show the decision log
 helix-mini agent          # interactive session
 ```
+
+Just type the request after `agent` — no quotes. (Avoid shell glob characters
+like `?` or `*` in an unquoted prompt; phrase it without them, or quote it.)
 
 The agent uses read-only Atlas tools automatically; launching a new pipeline
 run from the agent requires explicit terminal confirmation. See

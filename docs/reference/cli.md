@@ -60,11 +60,14 @@ Helix Mini — 1 folder(s), mode=lightspeed
 Drive helix-mini conversationally via the **Claude Agent SDK**.
 
 ```
-helix-mini agent [OPTIONS] [PROMPT]
+helix-mini agent [OPTIONS] [PROMPT]...
 ```
 
 **Arguments:**
-- `PROMPT` (optional) — One-shot request. Omit for an interactive session.
+- `PROMPT...` (optional, variadic) — Your request as plain words, **no quotes
+  needed**: `helix-mini agent search the atlas for cardiac modeling`. All
+  words are joined into one prompt. Omit entirely for an interactive session.
+  (Avoid unquoted shell globs like `?`/`*`; phrase without them or quote.)
 
 **Options:**
 

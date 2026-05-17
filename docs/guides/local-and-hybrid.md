@@ -75,15 +75,15 @@ helix-mini run ./my-folder --local-recommended --model-size small --lightspeed
 
 ## Another no-API-key option: Claude subscription
 
-If you have a Claude plan, `--cli claude` runs every stage through the `claude`
-CLI on your **subscription** rate limits — no API key, no local model:
+If you have a Claude plan, `--cli claude` runs every stage on your
+**subscription** rate limits — no API key, no local model. One-time: put a
+token in `~/.helix-mini/.env` (see
+[Claude Subscription / CLI Engine](claude-cli-engine.md) for the secure
+setup), then:
 
 ```bash
-claude setup-token && export CLAUDE_CODE_OAUTH_TOKEN="..."
 helix-mini run ./my-folder --cli claude --lightspeed
 ```
-
-See [Claude Subscription / CLI Engine](claude-cli-engine.md).
 
 ## Variations
 

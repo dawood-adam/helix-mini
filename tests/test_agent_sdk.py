@@ -210,3 +210,37 @@ class TestCliCommand:
 
         assert "CLAUDECODE" not in os.environ
         assert "CLAUDE_CODE_ENTRYPOINT" not in os.environ
+
+    def test_agent_prompt_joins_unquoted_words(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from helix_mini.cli import cli
+
+        captured = {}
+
+        def fake_run_agent(prompt=None, home=None, max_turns=30):
+            captured["prompt"] = prompt
+
+        monkeypatch.setattr("helix_mini.agent_sdk.run_agent", fake_run_agent)
+
+        result = CliRunner().invoke(
+            cli, ["agent", "search", "the", "atlas", "for", "cardiac"]
+        )
+        assert result.exit_code == 0
+        assert captured["prompt"] == "search the atlas for cardiac"
+
+    def test_agent_no_prompt_is_interactive(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from helix_mini.cli import cli
+
+        captured = {}
+
+        def fake_run_agent(prompt=None, home=None, max_turns=30):
+            captured["prompt"] = prompt
+
+        monkeypatch.setattr("helix_mini.agent_sdk.run_agent", fake_run_agent)
+
+        result = CliRunner().invoke(cli, ["agent"])
+        assert result.exit_code == 0
+        assert captured["prompt"] is None
