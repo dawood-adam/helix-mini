@@ -1,0 +1,25 @@
+[project]
+name = "helix-mini"
+version = "0.1.0"
+description = "Minimal Forge + Atlas: research pipelines with a persistent LLM wiki"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "litellm>=1.0",
+    "click>=8.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+pdf = ["pymupdf>=1.24"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+helix-mini = "helix_mini.cli:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
