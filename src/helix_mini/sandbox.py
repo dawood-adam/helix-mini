@@ -102,6 +102,64 @@ def sanitize_atlas_writes(
     return writes
 
 
+def _validate_artifact_name(name: str, root: Path) -> Path:
+    """Validate an LLM-supplied artifact filename/relative path, confined to root.
+
+    Rejects absolute paths, traversal, and anything resolving outside root.
+    """
+    name = CONTROL_CHAR_PATTERN.sub("", name).strip()
+    if not name:
+        raise SandboxError("Empty artifact name")
+    if len(name) > MAX_PATH_LENGTH:
+        raise SandboxError(f"Artifact name too long: {name[:80]}...")
+    if name.startswith(("/", "\\")) or (len(name) > 1 and name[1] == ":"):
+        raise SandboxError(f"Absolute artifact path blocked: {name}")
+    parts = Path(name).parts
+    if not parts or any(p in ("..", "", ".") for p in parts):
+        raise SandboxError(f"Unsafe artifact path blocked: {name}")
+    resolved = (root / name).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise SandboxError(f"Artifact path escapes project dir: {name}")
+    return resolved
+
+
+def sanitize_code_artifacts(
+    artifacts: list[dict],
+    artifacts_root: Path,
+) -> list[tuple[Path, str]]:
+    """Validate LLM builder artifacts for safe writing under ``artifacts_root``.
+
+    Each artifact is ``{"name": <relative path>, "content": <str>, ...}``. Names
+    are confined to ``artifacts_root`` (no absolute paths, no ``..``); content
+    is size-capped. Files are written but **never executed**. Returns a list of
+    ``(absolute_path, content)`` for the caller to write.
+    """
+    if not isinstance(artifacts, list):
+        return []
+    if len(artifacts) > MAX_WRITES_PER_BATCH:
+        log.warning(
+            "Artifact batch %d exceeds limit %d, truncating",
+            len(artifacts), MAX_WRITES_PER_BATCH,
+        )
+        artifacts = artifacts[:MAX_WRITES_PER_BATCH]
+
+    out: list[tuple[Path, str]] = []
+    for a in artifacts:
+        if not isinstance(a, dict):
+            continue
+        name, content = a.get("name"), a.get("content")
+        if not isinstance(name, str) or not isinstance(content, str):
+            log.warning("Skipping artifact missing string name/content")
+            continue
+        try:
+            abs_path = _validate_artifact_name(name, artifacts_root)
+        except SandboxError as e:
+            log.warning("Sandbox blocked artifact: %s", e)
+            continue
+        out.append((abs_path, validate_content(content)))
+    return out
+
+
 def validate_ingest_source(file_path: Path, base_folder: Path) -> bool:
     """Validate that a source file is safe to read (rejects external symlinks)."""
     if file_path.is_symlink():

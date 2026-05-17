@@ -80,10 +80,12 @@ atlas/
         ├── overview.md       # Project summary
         ├── .decisions.json   # Decision log (JSON)
         ├── decisions.md      # Decision log (markdown)
+        ├── artifacts/        # Builder-written code (sandbox-confined;
+        │   └── src/sim.py    #   rewritten in place on each refine pass)
         └── .snapshots/
             ├── snap-1.json   # State after scout
             ├── snap-2.json   # State after critic_methods
-            └── snap-N.json   # One per pipeline stage
+            └── snap-N.json   # One per pipeline stage (+ each refine loop)
 ```
 
 ## Browsing Pages Directly

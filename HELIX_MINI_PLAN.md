@@ -318,6 +318,7 @@ class Agents:
 # pipeline/router.py — Pure rules
 def gate_decision(state, gate_name, ask_fn) -> str   # proceed/revise/abort
 def sanity_route(state) -> str                         # pass/fail
+def iterate_decision(state) -> str                     # iterate/stop (cap-aware)
 def make_autonomy(lightspeed) -> dict                  # Gate settings
 
 # pipeline/graph.py — LangGraph definition
@@ -325,6 +326,11 @@ def build_graph(agents, home, ask_fn, progress_fn) -> StateGraph
 # 12 nodes: scout → gate_scope → critic_methods → gate_methods →
 #   planner → gate_plan → builder → gate_build → validator →
 #   sanity_route → critic_results → gate_results
+# Refine loop: gate_results --iterate--> builder (bounded by --max-iterations,
+#   default 3; ship/abandon --> END). Builder writes artifacts to
+#   projects/<name>/artifacts/ via sanitize_code_artifacts() and, when
+#   iterating, revises them in place from the reviewer feedback. Autonomous
+#   under --lightspeed; HITL (prompts ship/iterate/abandon) otherwise.
 
 # pipeline/runner.py — Execution
 def run_project(folder, atlas, model_config, ...) -> ForgeState
@@ -472,8 +478,10 @@ $ helix-mini run ./cardiac-papers --lightspeed
 │           ├── plan.md                   # Validation plan
 │           ├── .decisions.json           # Structured decision log
 │           ├── decisions.md              # Rendered narrative
+│           ├── artifacts/                # Builder-written code (sandbox-confined)
+│           │   └── src/sim.py ...        #   rewritten in place each refine pass
 │           └── .snapshots/
-│               └── snap-1.json ... snap-5.json
+│               └── snap-1.json ...       # one per node + per refine loop
 ├── raw/
 │   ├── cardiac-papers/                   # Immutable copies of input files
 │   │   ├── chen-2024.pdf

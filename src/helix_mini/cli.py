@@ -60,6 +60,11 @@ def cli(verbose: bool) -> None:
     "--cli-model", "cli_model", default=None, metavar="MODEL",
     help="Engine-native model for --cli (e.g. 'opus', 'sonnet', 'haiku').",
 )
+@click.option(
+    "--max-iterations", default=3, show_default=True, metavar="N",
+    help="Max builder↔critic_results refine loops (0 disables the loop). "
+    "Auto under --lightspeed; otherwise prompts ship/iterate/abandon.",
+)
 def run(
     folders: tuple[str, ...],
     lightspeed: bool,
@@ -70,6 +75,7 @@ def run(
     model_size: str | None,
     cli_engine: str | None,
     cli_model: str | None,
+    max_iterations: int,
 ) -> None:
     """Run Forge pipeline on one or more folders."""
     # Resolve model config based on flags
@@ -155,6 +161,7 @@ def run(
             research_question=question,
             progress_fn=_cli_progress,
             model_config=model_config,
+            max_iterations=max_iterations,
         )
 
         click.echo("\n--- Results ---")

@@ -30,6 +30,7 @@ class HelixMini:
         research_question: str = "",
         progress_fn: Callable[[str, str, float], None] | None = None,
         model_config: ModelConfig | None = None,
+        max_iterations: int = 3,
     ) -> list[ForgeState]:
         """Run Forge pipelines on one or more folders."""
         if model_config is None:
@@ -55,6 +56,7 @@ class HelixMini:
                 research_question=research_question,
                 home=self.home,
                 progress_fn=progress_fn,
+                max_iterations=max_iterations,
             )
             return [result]
 
@@ -67,5 +69,6 @@ class HelixMini:
                 research_question=research_question,
                 home=self.home,
                 progress_fn=progress_fn,
+                max_iterations=max_iterations,
             )
         )

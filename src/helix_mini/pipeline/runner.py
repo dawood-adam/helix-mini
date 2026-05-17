@@ -25,6 +25,7 @@ def run_project(
     ask_fn=None,
     home: Path | None = None,
     progress_fn=None,
+    max_iterations: int = 3,
 ) -> ForgeState:
     """Run the full Forge pipeline on a single folder."""
     home = home or HELIX_HOME
@@ -50,6 +51,9 @@ def run_project(
         "sanity_check_flags": None,
         "critiques": [],
         "next_action": "",
+        "verdict": "",
+        "build_iterations": 0,
+        "max_iterations": max_iterations,
         "cost_so_far": 0.0,
         "cost_cap": 5.0,
         "call_cap": model_config.call_cap(),
@@ -59,8 +63,13 @@ def run_project(
     }
 
     log.info("Starting Forge pipeline for: %s", project_name)
+    # Headroom for the bounded builder<->critic_results refine loop
+    # (~6 nodes per extra iteration on top of the ~12-node linear path).
+    recursion_limit = 30 + max_iterations * 8
     try:
-        final_state = compiled.invoke(initial_state)
+        final_state = compiled.invoke(
+            initial_state, {"recursion_limit": recursion_limit}
+        )
     except CostCapExceeded as e:
         log.warning("Pipeline stopped: %s", e)
         return ForgeState(
@@ -87,6 +96,7 @@ async def run_parallel(
     research_question: str = "",
     home: Path | None = None,
     progress_fn=None,
+    max_iterations: int = 3,
 ) -> list[ForgeState]:
     """Run multiple Forge pipelines in parallel, sharing one Atlas."""
     loop = asyncio.get_event_loop()
@@ -101,6 +111,7 @@ async def run_parallel(
                 research_question=research_question,
                 home=home,
                 progress_fn=progress_fn,
+                max_iterations=max_iterations,
             ),
         )
 

@@ -39,6 +39,15 @@ helix-mini run [OPTIONS] FOLDERS...
 | `--model-size` | choice | `None` | Qwen model size: `small`, `medium`, `large` |
 | `--cli` | text | `None` | Pilot the pipeline through an LLM CLI engine (e.g. `claude`) |
 | `--cli-model` | text | `None` | Engine-native model for `--cli` (e.g. `haiku`, `opus`) |
+| `--max-iterations` | int | `3` | Max `builder`↔`critic_results` refine loops (`0` disables looping) |
+
+**Refine loop:** After `critic_results`, a verdict of `iterate` loops back to the
+builder (carrying prior artifacts + reviewer feedback) to improve the code in
+place, up to `--max-iterations` (default 3; also bounded by the cost/call caps).
+Builder artifacts are written, sandbox-confined, to
+`~/.helix-mini/atlas/projects/<name>/artifacts/`. Under `--lightspeed` the loop
+runs autonomously; otherwise the gate prompts ship/iterate/abandon when run
+interactively.
 
 **Engine resolution:** Explicit `--cli` / `--local` / `--local-recommended` win. With no engine flag, `ModelConfig.default()` decides with **OAuth-wins** precedence: if `CLAUDE_CODE_OAUTH_TOKEN` is set, `run` uses `cli/claude` on your Claude subscription (no API key, even if one is set); else the litellm API path; else a friendly error pointing at `claude setup-token`, `helix-mini setup`, or `--local`. `--cli claude` needs only the `claude` binary on PATH. `--local`/`--local-recommended` require Ollama; `--local-recommended` also needs an API key for cloud stages.
 

@@ -22,7 +22,7 @@ Helix Mini is a Python CLI tool that runs research pipelines over input folders 
 | **pipeline/runner** | `src/helix_mini/pipeline/runner.py` | `run_project()` (single folder) and `run_parallel()` (multi-folder via asyncio) | pipeline/graph, atlas, config |
 | **pipeline/decisions** | `src/helix_mini/pipeline/decisions.py` | `append_decision()`, `render_decisions_md()`, `save_decisions_md()` — audit log | — |
 | **pipeline/snapshots** | `src/helix_mini/pipeline/snapshots.py` | `mint_snapshot()`, `load_snapshot()`, `list_snapshots()` — state checkpoints | — |
-| **sandbox** | `src/helix_mini/sandbox.py` | Validates all LLM-generated file writes — path traversal, content size, batch limits | atlas.store.PageWrite |
+| **sandbox** | `src/helix_mini/sandbox.py` | Validates all LLM-generated file writes — Atlas pages *and* builder code artifacts (path-confined, no traversal/absolute, size/batch caps, never executed) | atlas.store.PageWrite |
 | **llm** | `src/helix_mini/llm.py` | `call_llm()`/`call_llm_json()` — single chokepoint; routes `cli/` to llm_cli, else litellm | litellm, llm_cli (lazy) |
 | **llm_cli** | `src/helix_mini/llm_cli.py` | CLI-backed engine: `CLIEngine` registry, `call_cli_llm()`, `call_cap_for()` | subprocess, config (lazy) |
 | **agent_sdk** | `src/helix_mini/agent_sdk.py` | Claude Agent SDK driver — helix ops as in-process MCP tools + permission gate | claude-agent-sdk (optional, lazy) |
@@ -52,8 +52,12 @@ This is the primary workflow — running a full research pipeline on a folder of
    - Passes `atlas_writes` from the LLM response through `sanitize_atlas_writes()`
    - Writes validated pages to Atlas via `atlas.write()`
    - Returns updated state fields and cost
+   - The **builder** additionally writes its `artifacts` to disk under
+     `projects/<name>/artifacts/` via `sanitize_code_artifacts()` (path-confined,
+     size-capped, never executed)
 6. **Exception**: The **validator** is deterministic — it checks `experiment_results` against `validation_bands` from the plan with no LLM call.
-7. **Final state** is converted back to `ForgeState` and returned to the CLI, which prints stage counts and cumulative cost.
+7. **Refine loop**: after `critic_results`, `gate_results` reads the verdict — `ship`/`abandon` → END; `iterate` → back to **builder** (carrying prior artifacts + reviewer feedback for in-place revision), bounded by `--max-iterations` (default 3). Autonomous under `--lightspeed` (auto gates); otherwise the gate prompts ship/iterate/abandon when attached to a TTY.
+8. **Final state** is converted back to `ForgeState` and returned to the CLI, which prints stage counts and cumulative cost.
 
 ### Operation 2: `helix-mini setup`
 
@@ -164,7 +168,8 @@ graph LR
     sanity_route -->|fail| builder
 
     critic_results --> gate_results
-    gate_results --> END_NODE[END]
+    gate_results -->|iterate (bounded)| builder
+    gate_results -->|ship / abandon| END_NODE[END]
 
     style scout fill:#4a9eff,color:#fff
     style critic_methods fill:#4a9eff,color:#fff
@@ -203,10 +208,12 @@ All persistent data lives under `HELIX_HOME` (default `~/.helix-mini/`, overrida
         ├── overview.md                 # Project summary page
         ├── .decisions.json             # Decision log (JSON array)
         ├── decisions.md                # Decision log (rendered markdown)
+        ├── artifacts/                  # Builder-written code/analysis files
+        │   └── <relative paths>        #   (sandbox-confined; rewritten each refine pass)
         └── .snapshots/
             ├── snap-1.json             # Full ForgeState after scout
             ├── snap-2.json             # Full ForgeState after critic_methods
-            └── snap-N.json             # One per major pipeline node
+            └── snap-N.json             # One per major pipeline node (+ each refine loop)
 ```
 
 ---
@@ -217,6 +224,6 @@ These are confirmed ambiguities found during code inspection:
 
 - **`ask_fn` callback**: The `ask_fn` parameter in `gate_decision()`, `build_graph()`, and `run_project()` has no type annotation and is always `None` in CLI mode. When `None`, all gates auto-proceed (even in non-lightspeed mode). The expected signature for a future implementation is unclear.
 - **Caps not user-configurable**: The dollar limit is hardcoded to `$5.00` (`ForgeState.cost_cap`) and the CLI-engine fallback to `24` (`DEFAULT_CLI_CALL_CAP`). Neither has a CLI flag or config.toml setting.
-- **No dedicated retry limit**: The `sanity_route` fail→builder edge could loop, but it is now *bounded* — `_check_caps()` halts the run when `cost_cap` is reached (cost-reporting engines/API) or when `call_cap` is reached (CLI engines that don't report cost). There is still no purpose-built retry counter.
+- **Loop bounds**: The `critic_results`→`builder` refine loop is bounded by a dedicated `--max-iterations` counter (`ForgeState.build_iterations`/`max_iterations`, default 3). The older `sanity_route` fail→builder edge has no dedicated counter but is still bounded by `_check_caps()` (`cost_cap`, or `call_cap` for non-cost CLI engines).
 - **Dockerfile Python version**: The `Dockerfile` uses `python:3.13-slim` while `pyproject.toml` requires `>=3.11`. These are compatible but could drift.
 - **`asyncio.get_event_loop()`**: `run_parallel()` in `pipeline/runner.py` uses the deprecated `asyncio.get_event_loop()` (deprecated since Python 3.10, scheduled for removal).

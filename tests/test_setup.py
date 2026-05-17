@@ -94,6 +94,9 @@ class TestDockerSandbox:
     def test_collect_env_vars_empty(self, monkeypatch: object):
         for info in PROVIDERS.values():
             monkeypatch.delenv(info["env_var"], raising=False)  # type: ignore[attr-defined]
+        # ~/.helix-mini/.env may inject a real OAuth token via python-dotenv;
+        # clear it so the "no auth configured" case is truly empty.
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)  # type: ignore[attr-defined]
         from helix_mini.docker import _collect_env_vars
 
         args = _collect_env_vars()

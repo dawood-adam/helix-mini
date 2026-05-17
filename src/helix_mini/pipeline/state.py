@@ -28,6 +28,10 @@ class ForgeState:
     sanity_check_flags: list[str] | None = None
     critiques: list[dict] = field(default_factory=list)
     next_action: str = ""
+    # critic_results verdict (ship|iterate|abandon) + bounded refine loop
+    verdict: str = ""
+    build_iterations: int = 0
+    max_iterations: int = 3
 
     # Budget
     cost_so_far: float = 0.0
@@ -59,6 +63,9 @@ class GraphState(TypedDict, total=False):
     sanity_check_flags: list[str] | None
     critiques: list
     next_action: str
+    verdict: str
+    build_iterations: int
+    max_iterations: int
     cost_so_far: float
     cost_cap: float
     call_cap: int

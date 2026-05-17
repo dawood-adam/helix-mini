@@ -25,6 +25,9 @@ class ForgeState:
     sanity_check_flags: list[str] | None = None
     critiques: list[dict] = field(default_factory=list)
     next_action: str = ""
+    verdict: str = ""              # critic_results: ship|iterate|abandon
+    build_iterations: int = 0      # completed refine loops
+    max_iterations: int = 3        # cap on the critic_results->builder loop
     cost_so_far: float = 0.0
     cost_cap: float = 5.0
     call_cap: int = 0
@@ -91,7 +94,12 @@ Evaluates candidate approaches for feasibility. Returns `critiques`, `chosen_app
 Designs a validation plan with steps, success criteria, and validation bands. Returns `project_plan` and `cost`.
 
 #### `Agents.builder(state: ForgeState) -> dict`
-Implements the plan — produces code artifacts and experiment results. Returns `code_artifacts`, `experiment_results`, and `cost`.
+Implements the plan — produces code artifacts and experiment results, and
+**writes the artifacts to disk** under `projects/<name>/artifacts/` via
+`sanitize_code_artifacts()` (path-confined, size-capped, never executed). On a
+refine pass (`build_iterations > 0`) the prior artifacts + reviewer feedback +
+validator flags are fed back so it revises in place. Returns `code_artifacts`,
+`experiment_results`, `artifact_files`, and `cost`.
 
 #### `Agents.validator(state: ForgeState) -> dict`
 **Deterministic (no LLM call).** Checks `experiment_results` against `validation_bands` from the plan. Returns `sanity_check_flags` (list of `"HARD: ..."` or `"SOFT: ..."` strings, or `None` if all pass) and `cost` (always `0.0`).
@@ -207,6 +215,21 @@ def sanity_route(state: ForgeState) -> str
 
 Returns `"pass"` or `"fail"`. Any flag starting with `"HARD:"` causes a fail, routing back to the builder node.
 
+### `iterate_decision`
+
+```python
+def iterate_decision(state: ForgeState) -> str
+```
+
+Pure rule for the post-`critic_results` gate. Returns `"iterate"` only when
+`state.verdict == "iterate"` **and** `state.build_iterations < state.max_iterations`;
+otherwise `"stop"` (ship/abandon/unknown verdict, or the loop cap reached).
+`gate_results` applies it: `"iterate"` increments `build_iterations` and routes
+back to **builder** (which receives the prior artifacts + reviewer feedback for
+in-place revision); `"stop"` ends the run. When the `gate_results` autonomy is
+not `"auto"` and stdin is a TTY, the gate instead prompts the human
+ship/iterate/abandon (overriding the model verdict).
+
 ### `make_autonomy`
 
 ```python
@@ -263,7 +286,7 @@ Writes `decisions.md` to `project_dir` by rendering the JSON log.
 def mint_snapshot(state: ForgeState, project_dir: Path) -> Path
 ```
 
-Saves the full `ForgeState` as `project_dir/.snapshots/snap-N.json`. Returns the snapshot path.
+Saves the full `ForgeState` as `project_dir/.snapshots/snap-N.json` (one per major pipeline node, plus one per builder pass in the refine loop). Returns the snapshot path.
 
 ### `load_snapshot`
 

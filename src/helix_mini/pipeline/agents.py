@@ -10,7 +10,7 @@ from pathlib import Path
 from ..atlas import Atlas, Page, ingest_folder
 from ..config import ModelConfig
 from ..llm import call_llm_json
-from ..sandbox import sanitize_atlas_writes
+from ..sandbox import sanitize_atlas_writes, sanitize_code_artifacts
 from .state import ForgeState
 
 log = logging.getLogger(__name__)
@@ -90,11 +90,17 @@ PLANNER_PROMPT = (
 
 BUILDER_PROMPT = (
     "You are a research builder. Implement the validation plan by "
-    "writing code, analysis scripts, or structured outputs.\n\n"
+    "writing real, runnable code / analysis scripts / structured outputs. "
+    "Each artifact's `name` is a relative file path (e.g. `src/sim.py`, "
+    "`analysis/eval.py`) written into the project's artifacts/ directory — "
+    "no absolute paths, no `..`. Put the full file contents in `content`.\n"
+    "If prior artifacts and reviewer feedback are provided below, you are "
+    "ITERATING: return improved versions of the same files that address the "
+    "feedback (reuse the same `name`s), not a fresh from-scratch design.\n\n"
     "Respond with JSON:\n"
     "{\n"
     '  "artifacts": [\n'
-    '    {"name": "...", "type": "code|analysis|data", '
+    '    {"name": "src/example.py", "type": "code|analysis|data", '
     '"content": "...", "description": "..."}\n'
     "  ],\n"
     '  "results": [\n'
@@ -217,23 +223,57 @@ class Agents:
 
         return {"project_plan": resp.get("plan", {}), "cost": cost}
 
+    def _artifacts_dir(self, project_name: str) -> Path:
+        return self.atlas.root / "projects" / project_name / "artifacts"
+
     def builder(self, state: ForgeState) -> dict:
-        """Build code artifacts / execute the plan."""
+        """Build code artifacts, write them (sandboxed) to the project dir.
+
+        On a refine iteration (build_iterations > 0) the prior artifacts and
+        reviewer feedback are fed back so the model improves the code in place.
+        """
         context = self.atlas.read(f"implementation {state.project_name}")
+        user = (
+            f"## Atlas Context\n{_format_pages(context)}\n\n"
+            f"## Plan\n{json.dumps(state.project_plan, indent=2)}\n\n"
+            f"## Approach\n{json.dumps(state.chosen_approach, indent=2)}"
+        )
+        if state.build_iterations > 0:
+            prior = [
+                {"name": a.get("name"), "description": a.get("description"),
+                 "content": (a.get("content") or "")[:4000]}
+                for a in state.code_artifacts
+            ]
+            user += (
+                f"\n\n## REVISION pass {state.build_iterations}/"
+                f"{state.max_iterations} — improve these artifacts\n"
+                f"### Prior artifacts\n{json.dumps(prior, indent=2)}\n"
+                f"### Reviewer feedback\n{json.dumps(state.critiques, indent=2)}\n"
+                f"### Validator flags\n{state.sanity_check_flags or 'None'}"
+            )
+
         resp, cost = self._call_and_write(
-            "builder",
-            BUILDER_PROMPT,
-            (
-                f"## Atlas Context\n{_format_pages(context)}\n\n"
-                f"## Plan\n{json.dumps(state.project_plan, indent=2)}\n\n"
-                f"## Approach\n{json.dumps(state.chosen_approach, indent=2)}"
-            ),
-            state.project_name,
+            "builder", BUILDER_PROMPT, user, state.project_name,
         )
 
+        artifacts = resp.get("artifacts", [])
+        written: list[str] = []
+        if artifacts:
+            root = self._artifacts_dir(state.project_name)
+            for abs_path, content in sanitize_code_artifacts(artifacts, root):
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+                abs_path.write_text(content)
+                written.append(str(abs_path.relative_to(root)))
+            if written:
+                log.info(
+                    "[%s] builder wrote %d file(s) to %s",
+                    state.project_name, len(written), root,
+                )
+
         return {
-            "code_artifacts": resp.get("artifacts", []),
+            "code_artifacts": artifacts,
             "experiment_results": resp.get("results", []),
+            "artifact_files": written,
             "cost": cost,
         }
 

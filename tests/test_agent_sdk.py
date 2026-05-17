@@ -7,11 +7,16 @@ pure ``*_text`` helpers, the permission gate, and the missing-SDK error path.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+
+# These tests assert the actionable error when the optional SDK is absent;
+# skip them when claude-agent-sdk happens to be installed in the environment.
+_SDK_INSTALLED = importlib.util.find_spec("claude_agent_sdk") is not None
 
 from helix_mini.agent_sdk import (
     RUN_TOOL,
@@ -179,6 +184,11 @@ class TestPermissionGate:
             assert "not permitted" in reason
 
 
+@pytest.mark.skipif(
+    _SDK_INSTALLED,
+    reason="claude-agent-sdk is installed; the SDK-absent error path "
+    "cannot be exercised in this environment",
+)
 class TestSdkMissing:
     def test_require_sdk_raises_actionable_error(self):
         from helix_mini.agent_sdk import _require_sdk
@@ -192,22 +202,24 @@ class TestSdkMissing:
 
 
 class TestCliCommand:
-    def test_agent_command_strips_nested_guard_and_errors_cleanly(
-        self, monkeypatch
-    ):
+    def test_agent_command_strips_nested_guard(self, monkeypatch):
+        """The guard vars are popped before the SDK is touched, regardless of
+        whether claude-agent-sdk is installed (run_agent is stubbed)."""
+        import os
+
         from click.testing import CliRunner
 
         from helix_mini.cli import cli
 
         monkeypatch.setenv("CLAUDECODE", "1")
         monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+        monkeypatch.setattr(
+            "helix_mini.agent_sdk.run_agent", lambda *a, **k: None
+        )
 
         result = CliRunner().invoke(cli, ["agent", "hi"])
 
-        # SDK absent → exits non-zero, but the nested-session guard was cleared.
-        assert result.exit_code == 1
-        import os
-
+        assert result.exit_code == 0
         assert "CLAUDECODE" not in os.environ
         assert "CLAUDE_CODE_ENTRYPOINT" not in os.environ
 

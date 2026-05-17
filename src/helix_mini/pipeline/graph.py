@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from langgraph.graph import END, StateGraph
@@ -10,7 +11,7 @@ from langgraph.graph import END, StateGraph
 from ..config import LLM_STAGES
 from .agents import Agents
 from .decisions import append_decision, save_decisions_md
-from .router import gate_decision, sanity_route
+from .router import gate_decision, iterate_decision, sanity_route
 from .snapshots import mint_snapshot
 from .state import GraphState, to_state
 
@@ -160,11 +161,14 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
         _progress("builder", s.project_name, s.cost_so_far)
         result = agents.builder(s)
 
+        _files = result.get("artifact_files", [])
         append_decision(
             _decisions_path(home, s.project_name),
             "builder",
-            f"Produced {len(result.get('code_artifacts', []))} artifacts",
-            "Built code and ran experiments",
+            f"Produced {len(result.get('code_artifacts', []))} artifacts "
+            f"({len(_files)} file(s) written)",
+            f"Built code (iteration {s.build_iterations})"
+            + (f"; files: {', '.join(_files[:10])}" if _files else ""),
         )
         mint_snapshot(
             to_state({**state, **result}),
@@ -238,6 +242,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
         )
         return {
             "critiques": result.get("critiques", []),
+            "verdict": result.get("verdict", "ship"),
             "cost_so_far": s.cost_so_far + result.get("cost", 0),
             "current_stage": "gate_results",
             "completed_stages": s.completed_stages + ["critic_results"],
@@ -245,16 +250,62 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
 
     def gate_results_node(state: GraphState) -> GraphState:
         s = to_state(state)
-        decision = gate_decision(s, "gate_results", ask_fn)
+        verdict = (s.verdict or "ship").lower()
+        decision = iterate_decision(s)  # "iterate" | "stop" (cap-aware)
+        capped = s.build_iterations >= s.max_iterations
+        autonomy = s.autonomy.get("gate_results", "always_ask")
+
+        # HITL: when this gate isn't auto and we're on a TTY, the human chooses
+        # ship/iterate/abandon, overriding the model verdict. Non-interactive
+        # (tests, pipes) or --lightspeed (auto) falls back to the pure rule.
+        if autonomy != "auto" and sys.stdin.isatty():
+            import click
+
+            default = "i" if decision == "iterate" else (
+                "a" if verdict == "abandon" else "s")
+            note = " (max iterations reached)" if (
+                verdict == "iterate" and capped) else ""
+            choice = click.prompt(
+                f"\n[helix] critic verdict: {verdict}{note}. "
+                f"[s]hip / [i]terate / [a]bandon",
+                type=click.Choice(["s", "i", "a"]),
+                default=default, show_default=True,
+            )
+            if choice == "i" and not capped:
+                decision, verdict = "iterate", "iterate"
+            elif choice == "a":
+                decision, verdict = "stop", "abandon"
+            else:
+                decision, verdict = "stop", "ship"
+
+        if decision == "iterate":
+            append_decision(
+                _decisions_path(home, s.project_name), "gate_results",
+                f"iterate ({s.build_iterations + 1}/{s.max_iterations})",
+                "Looping back to builder to refine the artifacts",
+            )
+            save_decisions_md(
+                _project_dir(home, s.project_name),
+                _decisions_path(home, s.project_name),
+            )
+            return {
+                "next_action": "iterate",
+                "build_iterations": s.build_iterations + 1,
+                "current_stage": "builder",
+            }
+
+        final = "abandon" if verdict == "abandon" else "ship"
         append_decision(
-            _decisions_path(home, s.project_name), "gate_results", decision,
-            "Final gate — shipping or iterating",
+            _decisions_path(home, s.project_name), "gate_results", final,
+            "Final gate — pipeline complete"
+            + (" (iterations exhausted)" if (verdict == "iterate" and capped)
+               else ""),
         )
         save_decisions_md(
             _project_dir(home, s.project_name),
             _decisions_path(home, s.project_name),
         )
-        return {"next_action": decision, "current_stage": "done"}
+        return {"next_action": final, "current_stage": "done"}
 
     # Build the graph
     graph = StateGraph(GraphState)
@@ -291,6 +342,12 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
     )
     graph.add_edge("validator", "sanity_route")
     graph.add_edge("critic_results", "gate_results")
-    graph.add_edge("gate_results", END)
+
+    # gate_results: iterate -> back to builder (bounded refine loop), else END
+    graph.add_conditional_edges(
+        "gate_results",
+        lambda st: "builder" if st.get("next_action") == "iterate" else "END",
+        {"builder": "builder", "END": END},
+    )
 
     return graph

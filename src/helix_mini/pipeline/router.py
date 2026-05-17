@@ -54,6 +54,20 @@ def sanity_route(state: ForgeState) -> str:
     return "pass"
 
 
+def iterate_decision(state: ForgeState) -> str:
+    """Pure rule: after critic_results, loop back to builder or stop?
+
+    Returns "iterate" only if the verdict is "iterate" AND the bounded
+    refine-loop cap has not been reached; otherwise "stop" (ship/abandon/
+    unknown verdict, or max_iterations exhausted).
+    """
+    if (state.verdict or "ship").lower() != "iterate":
+        return "stop"
+    if state.build_iterations >= state.max_iterations:
+        return "stop"
+    return "iterate"
+
+
 def make_autonomy(lightspeed: bool) -> dict[str, str]:
     """Build gate autonomy settings."""
     gates = [
