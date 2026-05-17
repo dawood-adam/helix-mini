@@ -170,11 +170,16 @@ def run(
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Pipeline failed: {e}", err=True)
+        click.echo(f"Pipeline failed: {type(e).__name__}: {e}", err=True)
         if logging.getLogger().level == logging.DEBUG:
             import traceback
 
-            traceback.print_exc()
+            # Print only the chain of frame summaries (file/line/function),
+            # not local variable values, to avoid leaking API keys or
+            # other secrets that may be in scope.
+            click.echo("Traceback (most recent call last):", err=True)
+            for line in traceback.format_tb(e.__traceback__):
+                click.echo(line, err=True, nl=False)
         sys.exit(1)
 
 
