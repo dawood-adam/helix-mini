@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" role="img" aria-label="Helix Mini workflow and version-control diagram">
+  <title>Helix — workflow and version control</title>
+  <desc>A source folder flows through six LLM agents (Scout, Methods Critic, Planner, Builder, Validator, Results Critic) separated by decision gates, with a bounded refine loop back to Builder. Every agent reads from and writes to a shared persistent wiki called the Atlas. Every stage mints an immutable, numbered snapshot, forming a git-style history that can be listed, shown, diffed, diagrammed, and resumed from any stage.</desc>
+
+  <defs>
+    <marker id="aGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/>
+    </marker>
+    <marker id="aDark" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="aTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0F766E"/>
+    </marker>
+    <marker id="aViolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6D28D9"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="720" fill="#FFFFFF"/>
+
+  <!-- ===== Title band ===== -->
+  <text x="60" y="50" font-size="30" font-weight="700" fill="#1F2933">Helix</text>
+  <text x="60" y="76" font-size="14" fill="#66707A">A self-auditing research pipeline. Persistent knowledge wiki, git-style snapshot history you can diff and resume.</text>
+  <text x="1140" y="44" text-anchor="end" font-size="11.5" fill="#66707A">model-agnostic engine</text>
+  <text x="1140" y="63" text-anchor="end" font-size="11" fill="#94A3B8">Anthropic &#183; OpenAI &#183; Ollama &#183; Claude CLI &#183; subscription</text>
+  <line x1="60" y1="92" x2="1140" y2="92" stroke="#E5E8EB" stroke-width="1"/>
+
+  <!-- ===== Refine loop (above the pipeline lane) ===== -->
+  <path d="M1030 174 C 1030 128, 770 128, 701 174" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#aDark)"/>
+  <text x="866" y="120" text-anchor="middle" font-size="10.5" fill="#475569">HITL gate after every stage: proceed, or send back to ANY stage with feedback &#183; unbounded, cost-capped</text>
+
+  <!-- ===== Pipeline band ===== -->
+  <!-- Input: source folder -->
+  <path d="M64 196 h26 l8 -9 h26 a4 4 0 0 1 4 4 v41 a4 4 0 0 1 -4 4 H64 a4 4 0 0 1 -4 -4 v-32 a4 4 0 0 1 4 -4 z" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+  <line x1="60" y1="206" x2="124" y2="206" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="96" y="262" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1F2933">source folder</text>
+  <text x="96" y="278" text-anchor="middle" font-size="9.5" fill="#66707A">papers &#183; PDF &#183; code &#183; data</text>
+  <line x1="132" y1="210" x2="186" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+
+  <!-- Forward connectors -->
+  <line x1="302" y1="210" x2="338" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+  <line x1="454" y1="210" x2="489" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+  <line x1="605" y1="210" x2="641" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+  <line x1="757" y1="210" x2="792" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+  <line x1="908" y1="210" x2="944" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+  <line x1="1060" y1="210" x2="1094" y2="210" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#aGrey)"/>
+
+  <!-- Gates -->
+  <g fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.25">
+    <path d="M322 198 l12 12 l-12 12 l-12 -12 z"/>
+    <path d="M474 198 l12 12 l-12 12 l-12 -12 z"/>
+    <path d="M625 198 l12 12 l-12 12 l-12 -12 z"/>
+    <path d="M777 198 l12 12 l-12 12 l-12 -12 z"/>
+  </g>
+  <path d="M928 198 l12 12 l-12 12 l-12 -12 z" fill="#FEF6E7" stroke="#B45309" stroke-width="1.25"/>
+  <path d="M1076 200 l10 10 l-10 10 l-10 -10 z" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.25"/>
+  <g font-size="9" fill="#66707A" text-anchor="middle">
+    <text x="322" y="244">scope</text>
+    <text x="474" y="244">methods</text>
+    <text x="625" y="244">plan</text>
+    <text x="777" y="244">build</text>
+    <text x="928" y="244">sanity</text>
+    <text x="1076" y="244">verdict</text>
+  </g>
+
+  <!-- Agent nodes -->
+  <g>
+    <rect x="190" y="174" width="112" height="72" rx="10" fill="#EFF4FF" stroke="#2563EB" stroke-width="1.5"/>
+    <text x="246" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Scout</text>
+    <text x="246" y="225" text-anchor="middle" font-size="10.5" fill="#66707A">ingest + propose</text>
+
+    <rect x="342" y="174" width="112" height="72" rx="10" fill="#EFF4FF" stroke="#2563EB" stroke-width="1.5"/>
+    <text x="398" y="201" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Methods</text>
+    <text x="398" y="217" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Critic</text>
+    <text x="398" y="234" text-anchor="middle" font-size="10.5" fill="#66707A">vet approaches</text>
+
+    <rect x="493" y="174" width="112" height="72" rx="10" fill="#EFF4FF" stroke="#2563EB" stroke-width="1.5"/>
+    <text x="549" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Planner</text>
+    <text x="549" y="225" text-anchor="middle" font-size="10.5" fill="#66707A">design plan</text>
+
+    <rect x="645" y="174" width="112" height="72" rx="10" fill="#EFF4FF" stroke="#2563EB" stroke-width="2"/>
+    <text x="701" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Builder</text>
+    <text x="701" y="225" text-anchor="middle" font-size="10.5" fill="#66707A">write artifacts</text>
+
+    <rect x="796" y="174" width="112" height="72" rx="10" fill="#FEF6E7" stroke="#B45309" stroke-width="1.5"/>
+    <text x="852" y="201" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Validator</text>
+    <text x="852" y="217" text-anchor="middle" font-size="10.5" fill="#66707A">check vs. plan</text>
+    <text x="852" y="232" text-anchor="middle" font-size="9" fill="#B45309">deterministic</text>
+
+    <rect x="948" y="174" width="112" height="72" rx="10" fill="#EFF4FF" stroke="#2563EB" stroke-width="1.5"/>
+    <text x="1004" y="201" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Results</text>
+    <text x="1004" y="217" text-anchor="middle" font-size="14" font-weight="600" fill="#1F2933">Critic</text>
+    <text x="1004" y="234" text-anchor="middle" font-size="10.5" fill="#66707A">verdict</text>
+  </g>
+
+  <!-- Output -->
+  <rect x="1096" y="178" width="88" height="64" rx="8" fill="#E6F4F1" stroke="#0F766E" stroke-width="1.5"/>
+  <path d="M1128 196 h18 l6 6 v26 a2 2 0 0 1 -2 2 h-22 a2 2 0 0 1 -2 -2 v-30 a2 2 0 0 1 2 -2 z" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.25"/>
+  <path d="M1124 222 l5 5 l9 -10" fill="none" stroke="#0F766E" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1140" y="262" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1F2933">shipped</text>
+  <text x="1140" y="277" text-anchor="middle" font-size="9.5" fill="#66707A">validated code</text>
+
+  <!-- ===== Atlas read/write bus ===== -->
+  <g stroke="#0F766E" stroke-width="1.5">
+    <line x1="246" y1="246" x2="246" y2="276"/>
+    <line x1="398" y1="246" x2="398" y2="276"/>
+    <line x1="549" y1="246" x2="549" y2="276"/>
+    <line x1="701" y1="246" x2="701" y2="276"/>
+    <line x1="852" y1="246" x2="852" y2="276"/>
+    <line x1="1004" y1="246" x2="1004" y2="276"/>
+    <line x1="246" y1="276" x2="1004" y2="276"/>
+  </g>
+  <line x1="625" y1="276" x2="625" y2="300" stroke="#0F766E" stroke-width="1.75" marker-start="url(#aTeal)" marker-end="url(#aTeal)"/>
+  <text x="612" y="292" text-anchor="end" font-size="10" fill="#0F766E">read + write at every stage</text>
+
+  <!-- ===== Atlas panel ===== -->
+  <rect x="170" y="300" width="890" height="96" rx="14" fill="#E6F4F1" stroke="#0F766E" stroke-width="1.5"/>
+  <text x="198" y="340" font-size="20" font-weight="700" fill="#0F5249">Atlas</text>
+  <text x="198" y="361" font-size="11.5" fill="#3F6E66">persistent markdown wiki</text>
+  <text x="198" y="378" font-size="11.5" fill="#3F6E66">compounds knowledge across every project</text>
+  <g stroke="#0F766E" stroke-width="1.25" fill="#FFFFFF">
+    <line x1="905" y1="332" x2="965" y2="324" stroke-width="1"/>
+    <line x1="965" y1="324" x2="1014" y2="350" stroke-width="1"/>
+    <line x1="1014" y1="350" x2="952" y2="374" stroke-width="1"/>
+    <line x1="952" y1="374" x2="905" y2="332" stroke-width="1"/>
+    <line x1="965" y1="324" x2="952" y2="374" stroke-width="1"/>
+    <circle cx="905" cy="332" r="7"/>
+    <circle cx="965" cy="324" r="7"/>
+    <circle cx="1014" cy="350" r="7"/>
+    <circle cx="952" cy="374" r="7"/>
+  </g>
+
+  <!-- ===== Version-control band ===== -->
+  <text x="60" y="440" font-size="13" font-weight="700" fill="#1F2933">Snapshot history</text>
+  <text x="60" y="459" font-size="11" fill="#66707A">Every stage mints an immutable, numbered snapshot of the full pipeline state.</text>
+
+  <g font-size="9" fill="#66707A" text-anchor="middle">
+    <text x="246" y="498">scout</text>
+    <text x="398" y="498">methods</text>
+    <text x="549" y="498">planner</text>
+    <text x="701" y="498">builder</text>
+    <text x="852" y="498">validator</text>
+    <text x="1004" y="498">results</text>
+  </g>
+  <line x1="246" y1="512" x2="1004" y2="512" stroke="#C4B5FD" stroke-width="3" stroke-linecap="round"/>
+  <g fill="#6D28D9">
+    <circle cx="246" cy="512" r="6"/>
+    <circle cx="398" cy="512" r="6"/>
+    <circle cx="549" cy="512" r="6"/>
+    <circle cx="701" cy="512" r="6"/>
+    <circle cx="852" cy="512" r="6"/>
+    <circle cx="1004" cy="512" r="6"/>
+  </g>
+  <g font-size="9" fill="#5B21B6" text-anchor="middle">
+    <text x="246" y="531">snap-1</text>
+    <text x="398" y="531">snap-2</text>
+    <text x="549" y="531">snap-3</text>
+    <text x="701" y="531">snap-4</text>
+    <text x="852" y="531">snap-5</text>
+    <text x="1004" y="531">snap-N</text>
+  </g>
+
+  <!-- resume branch -->
+  <path d="M701 512 C 701 540, 742 556, 788 556 L 966 556" fill="none" stroke="#6D28D9" stroke-width="2" marker-end="url(#aViolet)"/>
+  <circle cx="701" cy="512" r="3.5" fill="#FFFFFF" stroke="#6D28D9" stroke-width="1.5"/>
+  <text x="877" y="549" text-anchor="middle" font-size="9.5" fill="#5B21B6">resume &#8594; re-enter the pipeline at any stage</text>
+
+  <text x="600" y="600" text-anchor="middle" font-size="11.5" fill="#66707A">helix snapshots&#160;&#160;list &#183; show &#183; diff &#183; diagram &#183; resume&#160;&#160;&#160;&#8776;&#160;&#160;&#160;git&#160;&#160;log &#183; show &#183; diff &#183; graph &#183; checkout + continue</text>
+
+  <!-- ===== Legend ===== -->
+  <g font-size="11" fill="#1F2933">
+    <rect x="60" y="617" width="13" height="13" rx="3" fill="#EFF4FF" stroke="#2563EB" stroke-width="1.25"/>
+    <text x="79" y="627">LLM agent</text>
+    <rect x="165" y="617" width="13" height="13" rx="3" fill="#FEF6E7" stroke="#B45309" stroke-width="1.25"/>
+    <text x="184" y="627">deterministic step</text>
+    <path d="M325 623 l7 7 l-7 7 l-7 -7 z" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.25"/>
+    <text x="340" y="627">gate (proceed / revise / abort)</text>
+    <rect x="585" y="617" width="13" height="13" rx="3" fill="#E6F4F1" stroke="#0F766E" stroke-width="1.25"/>
+    <text x="604" y="627">Atlas &#8212; shared persistent wiki</text>
+    <circle cx="836" cy="623.5" r="6" fill="#6D28D9"/>
+    <text x="849" y="627">snapshot history</text>
+  </g>
+
+  <line x1="60" y1="650" x2="1140" y2="650" stroke="#E5E8EB" stroke-width="1"/>
+  <text x="600" y="686" text-anchor="middle" font-size="13" font-weight="500" fill="#1F2933">Every decision logged. Every stage snapshotted. Every run resumable.</text>
+</svg>

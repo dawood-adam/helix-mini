@@ -1,66 +1,73 @@
-"""Shared test fixtures."""
+"""Shared fixtures: an isolated repo-local project + a fake LLM."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
-from helix_mini.atlas import Atlas
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    """Isolate HELIX_HOME to a tmp dir with a source folder + question."""
+    monkeypatch.setenv("HELIX_HOME", str(tmp_path))
+    src = tmp_path / "src-papers"
+    src.mkdir()
+    (src / "paper.md").write_text("# Paper\nCFD cardiac simulation findings.")
+    (tmp_path / "helix.toml").write_text(
+        '[atlas]\npath = "atlas"\n\n[limits]\ncost_cap = 10.0\ncall_cap = 0\n'
+    )
+    return src
 
 
-@pytest.fixture(autouse=True)
-def _clear_cli_engine_cache():
-    """`_load_config_engines` is process-memoized; reset it per test since
-    tests vary HELIX_HOME / config.toml."""
-    from helix_mini.llm_cli import _load_config_engines
-
-    _load_config_engines.cache_clear()
-    yield
+FAKE = {
+    "scout": ({
+        "source_summaries": [{"file": "paper.md", "summary": "cfd"}],
+        "approaches": [
+            {"id": "approach-1", "title": "A1", "description": "d", "feasibility": "high"},
+            {"id": "approach-2", "title": "A2", "description": "d", "feasibility": "low"},
+        ],
+        "atlas_writes": [
+            {"path": "sources/paper.md", "title": "Paper", "content": "c", "summary": "s"}
+        ],
+    }, 0.01),
+    "methods critic": ({
+        "critiques": [{"approach_id": "approach-1", "strengths": "x",
+                       "weaknesses": "y", "severity": "info", "recommendation": "go"}],
+        "recommended_id": "approach-1", "atlas_writes": [],
+    }, 0.02),
+    "research planner": ({
+        "plan": {"title": "Plan", "objective": "o",
+                 "steps": [{"step": 1, "action": "a", "expected_output": "e"}],
+                 "success_criteria": ["c"],
+                 "validation_bands": {"acc": {"min": 0.0, "max": 1.0}}},
+        "atlas_writes": [{"path": "projects/src-papers/plan.md", "title": "Plan",
+                          "content": "c", "summary": "s"}],
+    }, 0.03),
+    "research builder": ({
+        "artifacts": [{"name": "src/sim.py", "type": "code",
+                       "content": "print('ok')\n", "description": "sim"}],
+        "results": [{"metric": "acc", "value": 0.9, "notes": "ok"}],
+        "atlas_writes": [],
+    }, 0.04),
+    "results critic": ({
+        "assessment": "good", "strengths": ["s"], "weaknesses": [],
+        "recommendations": ["r"], "verdict": "ship",
+        "atlas_writes": [{"path": "projects/src-papers/overview.md",
+                          "title": "O", "content": "c", "summary": "s"}],
+    }, 0.05),
+}
 
 
 @pytest.fixture
-def tmp_atlas(tmp_path: Path) -> Atlas:
-    """Create a temporary Atlas instance."""
-    atlas_root = tmp_path / "atlas"
-    return Atlas(atlas_root)
+def fake_llm(monkeypatch):
+    """Patch the LLM chokepoint; route by agent system-prompt keyword."""
+    calls = {"n": 0}
 
+    def fake(*, model, system, user, **kw):
+        calls["n"] += 1
+        for key, resp in FAKE.items():
+            if key in system:
+                return resp
+        return ({"raw": "?"}, 0.0)
 
-@pytest.fixture
-def tmp_home(tmp_path: Path) -> Path:
-    """Create a temporary helix-mini home directory."""
-    home = tmp_path / ".helix-mini"
-    home.mkdir()
-    return home
-
-
-@pytest.fixture
-def sample_folder(tmp_path: Path) -> Path:
-    """Create a sample input folder with test files."""
-    folder = tmp_path / "test-project"
-    folder.mkdir()
-    (folder / "paper1.md").write_text(
-        "# Cardiac Modeling Study\n\n"
-        "This paper explores computational fluid dynamics for cardiac simulation.\n"
-        "Methods: finite element analysis, Navier-Stokes equations.\n"
-        "Results show improved accuracy in ventricular flow prediction."
-    )
-    (folder / "paper2.txt").write_text(
-        "Title: Neural Network Approaches to Heart Modeling\n\n"
-        "We propose using physics-informed neural networks (PINNs) for\n"
-        "cardiac electrophysiology simulation. Compared to traditional FEM,\n"
-        "PINNs offer faster inference with comparable accuracy."
-    )
-    (folder / "data.json").write_text(
-        json.dumps({"experiment": "cardiac-sim", "metrics": {"accuracy": 0.92}})
-    )
-    return folder
-
-
-def make_fake_llm_response(response_data: dict):
-    """Create a mock for call_llm_json that returns the given data."""
-    def fake_call_llm_json(**kwargs) -> tuple[dict, float]:
-        return response_data, 0.001
-    return fake_call_llm_json
+    monkeypatch.setattr("helix.core.agents.call_llm_json", fake)
+    return calls

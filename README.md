@@ -1,79 +1,85 @@
-# helix-mini
+# Helix
 
-Run a research pipeline over folders of source material, capture every
-decision, and build a persistent LLM wiki (**Atlas**) that compounds across
-projects. A 12-node LangGraph pipeline (scout → critic → planner → builder →
-validator → critic-results) reads from and writes to a shared markdown wiki.
+A self-auditing research pipeline. Point it at a folder of source material; it
+runs six agents — Scout → Methods Critic → Planner → Builder → Validator →
+Results Critic — pausing at a human gate after every stage. A persistent
+**Atlas** wiki compounds knowledge across projects, and every stage mints an
+immutable, git-style **snapshot** you can diff, branch, revert, and resume.
 
-See [HELIX_MINI_PLAN.md](HELIX_MINI_PLAN.md) for the full design, or
-[docs/](docs/) for guides and reference.
+<p align="center">
+  <img src="docs/workflow_process_and_version_control_diagram.svg" alt="Helix workflow and version-control diagram" width="100%">
+</p>
+
+Two ways to run the **same** pipeline:
+
+- **CLI-driven (default, no API key):** an agentic CLI such as Claude Code is
+  the engine. Near-zero dependencies — `click`, `python-dotenv`, `pyyaml`.
+- **SDK/library (`helix[sdk]`):** the same pipeline as a LangGraph graph over
+  the litellm API path, for programmatic/automated use.
+
+Agents are **markdown files** — edit a prompt, no code change. Snapshots cost
+**zero LLM calls**. Cycling is **unbounded**, bounded only by a configurable
+cost ceiling that *pauses* (resumable) instead of failing.
 
 ## Install
 
 ```bash
-pip install -e .                 # core
-pip install -e '.[pdf]'          # + PDF ingestion
-pip install -e '.[agent]'        # + `helix-mini agent`
+pip install -e .              # CLI mode — dependency-light
+pip install -e '.[sdk]'       # + LangGraph orchestrator / litellm API path
+pip install -e '.[agent]'     # + `helix agent` (Claude Agent SDK)
+pip install -e '.[pdf]'       # + PDF ingestion
 ```
 
-## Quick start (Claude subscription — no API key)
+## Quickstart (Claude subscription — no API key)
 
 ```bash
-# 1. one-time: mint a subscription token and store it securely
-claude setup-token                                   # prints a token
-mkdir -p ~/.helix-mini && chmod 700 ~/.helix-mini
-"${EDITOR:-nano}" ~/.helix-mini/.env                 # add one line:
-                                                     #   CLAUDE_CODE_OAUTH_TOKEN=<paste token>
-chmod 600 ~/.helix-mini/.env
+claude setup-token                                   # one-time
+mkdir -p .helix && "${EDITOR:-nano}" .helix/.env     # add: CLAUDE_CODE_OAUTH_TOKEN=<token>
+chmod 600 .helix/.env
 
-# 2. run — helix-mini loads ~/.helix-mini/.env automatically
-helix-mini init my-research                          # scaffold a folder
-helix-mini run ./my-research --lightspeed
+helix init my-research                               # scaffold a project
+cd my-research                                       # has question.md + CLAUDE.md + helix.toml
+# add source files, then:
+helix run .                                          # pauses at every stage for you
 ```
 
-That's it — no `export`, no wrapper, no quotes. `~/.helix-mini/.env` (mode
-`600`) is the one place helix-mini reads credentials from, every run.
+Auth precedence is **OAuth wins**: a subscription token always beats a stray
+`ANTHROPIC_API_KEY`, so you are never silently billed for the API. API keys
+(`helix setup`) and fully-offline Ollama (`--local`) also work.
 
-## Auth — pick one
-
-| Method | One-time setup | Notes |
-|---|---|---|
-| **Claude subscription** (recommended) | `claude setup-token`, then put `CLAUDE_CODE_OAUTH_TOKEN=…` in `~/.helix-mini/.env` | No API key. **OAuth wins**: a stray `ANTHROPIC_API_KEY` never silently bills you. |
-| **API key** | `helix-mini setup` (Anthropic/OpenAI) | Metered API billing. |
-| **Local** | install [Ollama](https://ollama.com) + `ollama pull qwen3:8b` | Fully offline, no account. |
-
-With any of these configured, `helix-mini run ./folder` just works — no flag
-needed. Explicit `--cli` / `--local` override the auto-choice.
-
-## Ways to run
+## Quick usage
 
 ```bash
-helix-mini run ./a ./b --lightspeed         # full pipeline (parallel), cheapest model
-helix-mini run ./a                          # full pipeline, default model, HITL gates
-helix-mini run ./a --cli claude             # force the Claude subscription engine
-helix-mini run ./a --local --model-size medium   # offline Qwen via Ollama
-helix-mini run ./a --sandbox                # inside a Docker sandbox
-helix-mini agent find what we know about PINNs   # conversational — no quotes
-helix-mini agent                            # interactive agent session
-helix-mini status                           # Atlas stats + projects
-helix-mini atlas search cardiac             # search the wiki
-helix-mini log my-research                  # decision log
-helix-mini snapshots list my-research       # git-style history (log)
-helix-mini snapshots diff my-research 5 7   # diff two snapshots
-helix-mini snapshots diagram my-research    # Mermaid gitGraph timeline
-helix-mini snapshots resume my-research 5 --at builder --lightspeed   # pick back up
+helix run .                          # full HITL — proceed / send back to ANY stage / stop
+helix run . --autonomous-until builder   # auto early gates, then ask
+helix run . --auto                   # fully autonomous
+helix run . --engine sdk             # same pipeline via the LangGraph runner
+helix snapshots list my-research     # git-style history
+helix snapshots diff my-research 3 7
+helix snapshots diagram my-research  # Mermaid gitGraph
+helix snapshots resume my-research 5 --at planner --branch retry
+helix snapshots revert my-research 5 # restore that snapshot's artifacts
+helix agent show the timeline for my-research   # conversational (gated)
+helix status | helix log <p> | helix atlas search <q>
 ```
 
-Snapshots work like git — `list`/`show`/`diff`/`diagram`, and `resume` any
-snapshot to re-enter the pipeline at a chosen stage (see
-[docs/guides/snapshots.md](docs/guides/snapshots.md)). `helix-mini agent`
-drives the **whole flow** conversationally (source+run, browse/diff snapshots,
-resume); read tools auto-approve, while `run_pipeline`/`resume_pipeline` are
-human-gated (terminal confirmation) behind a fail-closed permission gate.
+At any gate you can send the run back to **any** earlier stage with a note;
+that feedback is fed into that stage on re-run. The history branches and
+resumes like git.
+
+## Docs
+
+| Doc | What |
+|-----|------|
+| [docs/architecture.md](docs/architecture.md) | Two orchestrators over one core (Mermaid) |
+| [docs/usage.md](docs/usage.md) | Detailed usage: HITL, autonomy, engines, CLI-driven mode |
+| [docs/snapshots.md](docs/snapshots.md) | Git-style snapshot model + cost rationale |
+| [docs/agents.md](docs/agents.md) | Authoring the markdown agents |
+| [REFACTOR.md](REFACTOR.md) | What changed from helix-mini and why it's lighter |
 
 ## Develop
 
 ```bash
-pip install -e '.[dev]'
-pytest -q          # 156 passed, 3 skipped
+pip install -e '.[sdk,dev]'
+pytest -q          # 17 passed (incl. dual-orchestrator conformance)
 ```
