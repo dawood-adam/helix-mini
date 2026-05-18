@@ -1,91 +1,109 @@
 # Usage
 
-## Set up a project
+## 1. Create a project
 
 ```bash
-helix init my-research      # creates question.md, CLAUDE.md, helix.toml
+helix init my-research
 cd my-research
-# add source files (PDF/markdown/code/data), edit question.md
 ```
 
-`helix.toml` is the only configuration. Defaults are repo-local: the Atlas is
-`./atlas`, snapshots are `./.helix/snapshots`. Override `[atlas].path` or set
-`HELIX_HOME` to relocate.
+This writes three files:
 
-## Run with human-in-the-loop (default)
+- `question.md` — your research question. Edit it.
+- `helix.toml` — the only configuration. Defaults are repo-local: the Atlas
+  is `./atlas`, snapshots are `./.helix/snapshots`.
+- `CLAUDE.md` — instructions an agentic CLI reads when you say "start helix".
+
+Add your source files (PDF, markdown, code, data) to the folder.
+
+## 2. Run with review (the default)
 
 ```bash
 helix run .
 ```
 
-After every stage Helix prints a report (decision, rationale, state summary)
-and asks:
+After each stage Helix prints a report and waits:
 
-- **`p` proceed** — continue to the next stage.
-- **`g` go back** — pick *any* stage and type feedback. The run re-enters
-  there; your note is injected into that stage's prompt on the re-run and
-  recorded in the decision/snapshot trail. Cycling is unbounded.
-- **`s` stop**.
-
-`critic_results` reports a verdict (ship / iterate / abandon); `iterate` is
-just a send-back to `builder`. The deterministic `validator` auto-routes hard
-band violations back to `builder` with the flags as feedback.
-
-## Autonomy
-
-```bash
-helix run . --autonomous-until builder   # auto-proceed gates before builder, then ask
-helix run . --auto                       # fully autonomous (no gates)
+```
+── gate after planner ──
+  decision : Plan: CFD cardiac model
+  rationale: Designed validation plan with success criteria
+  ...
+[p]roceed / [g]o back to a stage / [s]top:
 ```
 
-Mode is per run; resume with a different mode any time.
+- `p` — continue to the next stage.
+- `g` — choose any earlier stage and type feedback. The run re-enters there
+  and your note is added to that stage's prompt. You can do this as many
+  times as you want; there is no iteration cap.
+- `s` — stop.
 
-## Engines (model-agnostic)
+The Results Critic ends with a verdict of ship, iterate, or abandon. `iterate`
+is simply a send-back to the builder. The Validator is deterministic: a hard
+band violation sends the run back to the builder automatically, with the
+flags as feedback.
+
+## 3. Run with autonomy
 
 ```bash
-helix run .                       # auto: OAuth subscription > API key
-helix run . --cli claude          # force the Claude CLI engine (no API key)
-helix run . --lightspeed          # cheapest model + auto gates
-helix run . --local --model-size medium     # offline Qwen via Ollama
-helix run . --local-recommended   # simple stages local, critical via cloud
-helix run . --engine sdk          # same pipeline via the LangGraph runner
+helix run . --autonomous-until builder   # auto until builder, then ask
+helix run . --auto                       # never ask
 ```
 
-Auth lives in `.helix/.env` (or `helix setup`). **OAuth wins**: a
-`CLAUDE_CODE_OAUTH_TOKEN` always beats `ANTHROPIC_API_KEY`. The API path and
-`--engine sdk` need `helix[sdk]`.
+Autonomy is chosen per run. A resume can use a different setting.
 
-## Driving from Claude Code (CLI-driven mode)
+## Choosing an engine
+
+```bash
+helix run .                                   # auto: OAuth, else API key
+helix run . --cli claude                      # force the Claude CLI, no API key
+helix run . --lightspeed                      # cheapest model, auto gates
+helix run . --local --model-size medium       # offline, Ollama + Qwen
+helix run . --local-recommended               # simple stages local, hard ones cloud
+helix run . --engine sdk                      # same pipeline, LangGraph runner
+```
+
+Credentials live in `.helix/.env`, or run `helix setup` for a guided API-key
+setup. OAuth wins: a `CLAUDE_CODE_OAUTH_TOKEN` always beats
+`ANTHROPIC_API_KEY`. The API path and `--engine sdk` need `helix[sdk]`.
+
+## Driving from Claude Code
 
 `helix init` writes a `CLAUDE.md` so an agentic CLI opened in the folder knows
-to run `helix run .`, relay each gate report, and use the snapshot commands.
-The CLI itself is the model — no API key. This is the primary mode.
+what to do. When you say "start helix" it first asks you to point out the
+source material and confirm the question, then runs `helix run` and relays
+each gate report back to you. The CLI is the model, so no API key is needed.
+This is the primary way to use Helix.
 
 ## The Claude agent
 
 ```bash
 helix agent show the timeline for my-research and resume it from snap-5
-helix agent                       # interactive
+helix agent                                   # interactive session
 ```
 
-Read tools (atlas/decision/snapshot) auto-approve; `run_pipeline`,
-`resume_pipeline`, `snapshot_revert` are human-gated. The gate is
-**fail-closed**: every other tool, including the SDK's Bash/Write/Edit, is
-denied and hard-blocked. Needs `helix[agent]`.
+Read tools (Atlas, decision log, snapshots) are auto-approved.
+`run_pipeline`, `resume_pipeline`, and `snapshot_revert` require confirmation.
+The gate is fail-closed: every other tool, including the SDK's Bash, Write,
+and Edit, is denied. Needs `helix[agent]`.
 
-## Cost ceiling
+## The cost ceiling
 
-`helix.toml [limits] cost_cap / call_cap` bound a run. On reaching the
-ceiling: interactively you are asked to continue (doubles the ceiling) or
-stop; autonomously the run **pauses** (a snapshot is minted) and prints a
-`helix snapshots resume` line. It never silently dies.
+`helix.toml` sets `cost_cap` and `call_cap` under `[limits]`. When a run hits
+the ceiling:
 
-## Snapshots & resume
+- interactive: you are asked to continue (which doubles the ceiling) or stop.
+- autonomous: the run takes a snapshot, stops, and prints a resume command.
 
-See [snapshots.md](snapshots.md). Common:
+A run never fails silently or loses work at the ceiling.
+
+## Snapshots and resume
+
+Every stage and every send-back is snapshotted. See
+[snapshots.md](snapshots.md). The common commands:
 
 ```bash
 helix snapshots list my-research
 helix snapshots resume my-research 5 --at planner --branch retry --auto
-helix snapshots revert my-research 5      # restore that snapshot's artifacts
+helix snapshots revert my-research 5      # restore that snapshot's files
 ```

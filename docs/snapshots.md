@@ -1,57 +1,67 @@
-# Snapshots — git-style version control
+# Snapshots
 
-A snapshot is a timestamped, stage-stamped, deterministic serialization of the
-full pipeline state. One is minted after **every stage** and **every
-send-back**.
+## The idea
 
-## Why it's cheap
+A snapshot is a saved point in a run: the full pipeline state at one stage,
+stamped with the stage name and time. Helix takes one after every stage and
+every send-back, automatically. Think of it as git for the pipeline: a
+branchable history you can inspect, diff, and resume from any point.
 
-A snapshot costs **zero LLM calls**. It reuses the decision/rationale the
-stage already produced for the gate as its human-readable digest — nothing is
-summarized on the fly. Artifact bytes are **content-addressed**: stored once
-under `.helix/snapshots/<project>/objects/<sha256>` and referenced by hash
-from a manifest. Identical artifacts across iterations are deduped, so a
-snapshot stays a few KB even after hundreds of refine cycles. The pipeline
-state blob never inlines artifact bytes.
+## Why it is free
 
-So per-stage *and* per-send-back frequency is affordable; that is why cycling
-is unbounded and the only real bound is the cost ceiling.
+A snapshot costs no LLM calls. It reuses the decision text the stage already
+wrote for the gate as its human-readable summary, so nothing is generated on
+the fly.
 
-## The DAG
+Generated artifacts are content-addressed. Each file's bytes are stored once
+under `.helix/snapshots/<project>/objects/<sha256>` and referenced by hash.
+Identical files across iterations are stored once, and the state record never
+inlines artifact bytes. A snapshot stays a few kilobytes even after hundreds
+of refine cycles. That is why per-stage snapshots are affordable and why
+cycling has no fixed cap.
 
-Each snapshot records `id`, `parent`, and `branch`, so the history is a real
-git-style DAG, not a flat list.
+## Commands
 
-| git | helix |
-|-----|-------|
+Each snapshot records its `id`, `parent`, and `branch`, so the history is a
+real DAG rather than a flat list.
+
+| git | Helix |
+|---|---|
 | `git log` | `helix snapshots list <project>` |
 | `git show` | `helix snapshots show <project> <id>` |
 | `git diff A B` | `helix snapshots diff <project> <a> <b>` |
-| graph view | `helix snapshots diagram <project>` (Mermaid `gitGraph`) |
-| `git checkout -- .` | `helix snapshots revert <project> <id>` (restore artifacts) |
-| `git checkout <ref> && continue` | `helix snapshots resume <project> <id> [--at STAGE] [--branch NAME]` |
+| graph view | `helix snapshots diagram <project>` (writes a Mermaid `gitGraph`) |
+| `git checkout -- .` | `helix snapshots revert <project> <id>` |
+| `git checkout <ref>` then continue | `helix snapshots resume <project> <id> [--at STAGE] [--branch NAME]` |
 
 ## Resume
 
-`resume` rehydrates the snapshot's full state — including artifact bytes from
-the object store — and re-enters the pipeline at `--at` (any stage; default
-the snapshot's stage). `--branch NAME` continues on a new branch whose parent
-is that snapshot, so experiments don't clobber the main line. Same engine and
-autonomy flags as `run`.
+`resume` rebuilds the snapshot's full state, including artifact bytes from the
+object store, and re-enters the pipeline. By default it re-enters at the
+snapshot's own stage; `--at STAGE` picks any stage. `--branch NAME` continues
+on a new branch whose parent is that snapshot, so an experiment never
+overwrites the main line. `resume` accepts the same engine and autonomy flags
+as `run`.
 
 ```bash
-helix snapshots resume cardiac 7                       # from snap-7's stage
+helix snapshots resume cardiac 7                          # from snap-7's stage
 helix snapshots resume cardiac 5 --at planner --branch replan --auto
 ```
 
-`revert` is the file-level checkout: it writes a snapshot's artifacts back to
-the project's `artifacts/` directory without running anything.
+## Revert
 
-## Inspecting raw
+`revert` is the file-level checkout. It writes a snapshot's artifacts back
+into the project's `artifacts/` directory and runs nothing.
+
+```bash
+helix snapshots revert cardiac 5
+```
+
+## Inspecting raw files
 
 Snapshots are plain JSON under `.helix/snapshots/<project>/`:
 
 ```bash
-cat .helix/snapshots/cardiac/7.json | python -m json.tool   # state has code_artifacts: []
-ls  .helix/snapshots/cardiac/objects/                        # artifact bytes by sha
+python -m json.tool < .helix/snapshots/cardiac/7.json   # state.code_artifacts is []
+ls .helix/snapshots/cardiac/objects/                     # artifact bytes by hash
 ```

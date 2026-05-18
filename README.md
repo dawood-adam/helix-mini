@@ -1,85 +1,93 @@
 # Helix
 
-A self-auditing research pipeline. Point it at a folder of source material; it
-runs six agents — Scout → Methods Critic → Planner → Builder → Validator →
-Results Critic — pausing at a human gate after every stage. A persistent
-**Atlas** wiki compounds knowledge across projects, and every stage mints an
-immutable, git-style **snapshot** you can diff, branch, revert, and resume.
+Helix turns a folder of source material into validated, contextualized code.
+It runs six agents in sequence and stops for your review after each one. A
+persistent wiki accumulates what it learns across projects, and every step is
+saved as a git-style snapshot you can diff, branch, and resume.
 
 <p align="center">
   <img src="docs/workflow_process_and_version_control_diagram.svg" alt="Helix workflow and version-control diagram" width="100%">
 </p>
 
-Two ways to run the **same** pipeline:
+## How it works
 
-- **CLI-driven (default, no API key):** an agentic CLI such as Claude Code is
-  the engine. Near-zero dependencies — `click`, `python-dotenv`, `pyyaml`.
-- **SDK/library (`helix[sdk]`):** the same pipeline as a LangGraph graph over
-  the litellm API path, for programmatic/automated use.
-
-Agents are **markdown files** — edit a prompt, no code change. Snapshots cost
-**zero LLM calls**. Cycling is **unbounded**, bounded only by a configurable
-cost ceiling that *pauses* (resumable) instead of failing.
+- **Six stages.** Scout, Methods Critic, Planner, Builder, Validator, Results
+  Critic. Validator is deterministic; the rest call an LLM.
+- **You are in the loop.** A gate runs after every stage. You can proceed,
+  send the run back to any earlier stage with a note, or stop. The note is
+  given to that stage when it re-runs.
+- **The Atlas wiki compounds.** Every stage reads and writes a markdown wiki
+  that persists across projects.
+- **Every step is a snapshot.** Snapshots are taken automatically. They cost
+  no LLM calls and form a branchable history you can resume from any point.
+- **Two engines, one pipeline.** By default an agentic CLI (such as Claude
+  Code) is the model, so no API key is needed. The same pipeline also runs as
+  a LangGraph graph for programmatic use.
 
 ## Install
 
-```bash
-pip install -e .              # CLI mode — dependency-light
-pip install -e '.[sdk]'       # + LangGraph orchestrator / litellm API path
-pip install -e '.[agent]'     # + `helix agent` (Claude Agent SDK)
-pip install -e '.[pdf]'       # + PDF ingestion
-```
+| Command | Adds |
+|---|---|
+| `pip install -e .` | CLI mode. Dependency-light: `click`, `python-dotenv`, `pyyaml`. |
+| `pip install -e '.[sdk]'` | LangGraph orchestrator and the litellm API path. |
+| `pip install -e '.[agent]'` | `helix agent` (Claude Agent SDK). |
+| `pip install -e '.[pdf]'` | PDF ingestion. |
 
-## Quickstart (Claude subscription — no API key)
+## Get started
 
 ```bash
-claude setup-token                                   # one-time
-mkdir -p .helix && "${EDITOR:-nano}" .helix/.env     # add: CLAUDE_CODE_OAUTH_TOKEN=<token>
+helix init my-research          # scaffold the project
+cd my-research
+
+claude setup-token              # one-time; prints a token
+mkdir -p .helix
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<paste token>" > .helix/.env
 chmod 600 .helix/.env
 
-helix init my-research                               # scaffold a project
-cd my-research                                       # has question.md + CLAUDE.md + helix.toml
-# add source files, then:
-helix run .                                          # pauses at every stage for you
+# add your source files (PDF, markdown, code, data) to this folder, then:
+helix run .
 ```
 
-Auth precedence is **OAuth wins**: a subscription token always beats a stray
-`ANTHROPIC_API_KEY`, so you are never silently billed for the API. API keys
-(`helix setup`) and fully-offline Ollama (`--local`) also work.
+`helix run .` pauses after every stage and prints a report. Answer the prompt:
+`p` to proceed, `g` to send the run back to a stage with feedback, or `s` to
+stop.
 
-## Quick usage
+No Claude subscription? Run `helix setup` for an API key, or `helix run .
+--local` to use Ollama offline. Auth precedence is OAuth first: a subscription
+token always wins over a stray `ANTHROPIC_API_KEY`, so you are never billed
+for the API by accident.
+
+## Everyday commands
 
 ```bash
-helix run .                          # full HITL — proceed / send back to ANY stage / stop
-helix run . --autonomous-until builder   # auto early gates, then ask
-helix run . --auto                   # fully autonomous
-helix run . --engine sdk             # same pipeline via the LangGraph runner
-helix snapshots list my-research     # git-style history
+helix run .                                   # human-in-the-loop (default)
+helix run . --autonomous-until builder        # auto until a stage, then ask
+helix run . --auto                            # fully autonomous
+helix run . --engine sdk                      # same pipeline, LangGraph runner
+helix snapshots list my-research              # history
 helix snapshots diff my-research 3 7
-helix snapshots diagram my-research  # Mermaid gitGraph
+helix snapshots diagram my-research           # Mermaid gitGraph
 helix snapshots resume my-research 5 --at planner --branch retry
-helix snapshots revert my-research 5 # restore that snapshot's artifacts
-helix agent show the timeline for my-research   # conversational (gated)
-helix status | helix log <p> | helix atlas search <q>
+helix snapshots revert my-research 5          # restore that snapshot's files
+helix agent show the timeline for my-research # conversational, gated
+helix status                                  # Atlas overview
+helix log my-research                         # decision log
+helix atlas search cardiac                    # search the wiki
 ```
 
-At any gate you can send the run back to **any** earlier stage with a note;
-that feedback is fed into that stage on re-run. The history branches and
-resumes like git.
+## Documentation
 
-## Docs
-
-| Doc | What |
-|-----|------|
-| [docs/architecture.md](docs/architecture.md) | Two orchestrators over one core (Mermaid) |
-| [docs/usage.md](docs/usage.md) | Detailed usage: HITL, autonomy, engines, CLI-driven mode |
-| [docs/snapshots.md](docs/snapshots.md) | Git-style snapshot model + cost rationale |
-| [docs/agents.md](docs/agents.md) | Authoring the markdown agents |
-| [REFACTOR.md](REFACTOR.md) | What changed from helix-mini and why it's lighter |
+| Doc | Read it for |
+|---|---|
+| [docs/usage.md](docs/usage.md) | Day-to-day: gates, autonomy, engines, the agent |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit (with diagrams) |
+| [docs/snapshots.md](docs/snapshots.md) | The git-style snapshot model |
+| [docs/agents.md](docs/agents.md) | Editing or adding an agent |
+| [REFACTOR.md](REFACTOR.md) | What changed from helix-mini |
 
 ## Develop
 
 ```bash
 pip install -e '.[sdk,dev]'
-pytest -q          # 17 passed (incl. dual-orchestrator conformance)
+pytest -q          # 17 passed, including dual-orchestrator conformance
 ```
