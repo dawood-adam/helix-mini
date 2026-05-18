@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
+from ..sandbox import SandboxError, validate_artifact_name
 from .state import PipelineState, to_state
+
+log = logging.getLogger(__name__)
 
 
 def _root(project: str) -> Path:
@@ -132,10 +136,17 @@ def restore_artifacts(project: str, snap_id: str | int, dest: Path) -> list[str]
         name = a.get("name")
         if not name:
             continue
-        fp = dest / name
+        # Defense in depth: never trust a stored name. A hand-crafted or
+        # legacy snapshot could carry a traversal/absolute path; confine the
+        # write to ``dest`` exactly as the builder write path does.
+        try:
+            fp = validate_artifact_name(name, dest)
+        except SandboxError as e:
+            log.warning("Sandbox blocked snapshot artifact restore: %s", e)
+            continue
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(a.get("content") or "")
-        written.append(name)
+        written.append(str(fp.relative_to(dest.resolve())))
     return written
 
 

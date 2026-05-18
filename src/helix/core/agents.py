@@ -225,15 +225,21 @@ def _map_planner(r: dict, s: PipelineState, c: AgentCtx) -> dict:
 
 
 def _map_builder(r: dict, s: PipelineState, c: AgentCtx) -> dict:
-    artifacts = r.get("artifacts", [])
     root = c.artifacts_dir(s.project_name)
     written: list[str] = []
-    for abs_path, content in sanitize_code_artifacts(artifacts, root):
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(content)
-        written.append(str(abs_path.relative_to(root)))
+    clean: list[dict] = []
+    # Sanitize once; state stores ONLY validated names so a traversal name can
+    # never be persisted into a snapshot and replayed by restore/resume.
+    for a in sanitize_code_artifacts(r.get("artifacts", []), root):
+        a["path"].parent.mkdir(parents=True, exist_ok=True)
+        a["path"].write_text(a["content"])
+        written.append(a["name"])
+        clean.append({
+            "name": a["name"], "type": a["type"],
+            "description": a["description"], "content": a["content"],
+        })
     return {
-        "code_artifacts": artifacts,
+        "code_artifacts": clean,
         "experiment_results": r.get("results", []),
         "artifact_files": written,
     }

@@ -83,7 +83,7 @@ def sanitize_atlas_writes(raw_writes: list[dict], atlas_root: Path) -> list[Page
     return writes
 
 
-def _validate_artifact_name(name: str, root: Path) -> Path:
+def validate_artifact_name(name: str, root: Path) -> Path:
     name = CONTROL_CHAR_PATTERN.sub("", name).strip()
     if not name:
         raise SandboxError("Empty artifact name")
@@ -102,18 +102,24 @@ def _validate_artifact_name(name: str, root: Path) -> Path:
 
 def sanitize_code_artifacts(
     artifacts: list[dict], artifacts_root: Path
-) -> list[tuple[Path, str]]:
+) -> list[dict]:
     """Validate builder artifacts for safe writing under ``artifacts_root``.
 
-    Returns ``(absolute_path, content)`` pairs. Files are written but never
-    executed.
+    Returns one sanitized record per accepted artifact::
+
+        {"path": <abs Path>, "name": <safe relative str>,
+         "type": ..., "description": ..., "content": <size-capped str>}
+
+    This is the single source of truth for what gets written *and* what is
+    stored in pipeline state, so an unsafe name can never be persisted into a
+    snapshot. Files are written by the caller but never executed.
     """
     if not isinstance(artifacts, list):
         return []
     if len(artifacts) > MAX_WRITES_PER_BATCH:
         log.warning("Artifact batch %d exceeds %d, truncating", len(artifacts), MAX_WRITES_PER_BATCH)
         artifacts = artifacts[:MAX_WRITES_PER_BATCH]
-    out: list[tuple[Path, str]] = []
+    out: list[dict] = []
     for a in artifacts:
         if not isinstance(a, dict):
             continue
@@ -122,11 +128,17 @@ def sanitize_code_artifacts(
             log.warning("Skipping artifact missing string name/content")
             continue
         try:
-            abs_path = _validate_artifact_name(name, artifacts_root)
+            abs_path = validate_artifact_name(name, artifacts_root)
         except SandboxError as e:
             log.warning("Sandbox blocked artifact: %s", e)
             continue
-        out.append((abs_path, validate_content(content)))
+        out.append({
+            "path": abs_path,
+            "name": str(abs_path.relative_to(artifacts_root.resolve())),
+            "type": a.get("type"),
+            "description": a.get("description"),
+            "content": validate_content(content),
+        })
     return out
 
 
