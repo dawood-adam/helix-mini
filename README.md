@@ -51,6 +51,11 @@ your feedback attached. "Run autonomously until the builder" hands over
 control up to that point. Nothing is lost: each stage and each send-back is
 snapshotted, so you can later ask it to diff, branch, or resume any point.
 
+Helix's interface is tool-agnostic. Any agentic CLI — or a plain terminal —
+can drive it; Claude Code is the zero-setup, optimized path because it reads
+the scaffolded `CLAUDE.md` automatically. Point another CLI at that file
+through its own rules mechanism and it drives Helix the same way.
+
 ## Run it directly
 
 The chat layer is optional. `helix run` is the same pipeline without it, and
@@ -115,10 +120,10 @@ helix status | helix log <project> | helix atlas search <query>
 
 | Doc | Read it for |
 |---|---|
-| [docs/usage.md](docs/usage.md) | Driving Helix from Claude Code or the CLI |
-| [docs/architecture.md](docs/architecture.md) | How the pieces fit (with diagrams) |
+| [docs/usage.md](docs/usage.md) | Driving Helix (Claude Code or CLI), a run end to end, engines |
+| [docs/pipeline.md](docs/pipeline.md) | What each stage does in detail; authoring agents |
 | [docs/snapshots.md](docs/snapshots.md) | The git-style snapshot model |
-| [docs/agents.md](docs/agents.md) | Editing or adding an agent |
+| [docs/architecture.md](docs/architecture.md) | Internals, for contributors |
 | [REFACTOR.md](REFACTOR.md) | What changed from helix-mini |
 
 ## Develop
