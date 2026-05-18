@@ -21,22 +21,32 @@ This folder is a Helix research project. The pipeline is:
 
 `{stages}`
 
-To drive it from here, run the `helix` CLI:
+## Starting ("start helix")
 
-- `helix run .` — runs the pipeline and **pauses at every stage** for a
-  human decision (proceed / send back to any earlier stage with feedback /
-  stop). This is the default; relay each gate report to me and wait.
-- `helix run . --autonomous-until builder` — auto-proceed early gates, then
-  start asking. `helix run . --auto` runs fully autonomously.
-- A snapshot is minted automatically at every stage and every send-back.
+When I say **start helix** (or similar), do NOT run the pipeline yet. First:
 
-Browse the git-style history and pick the run back up:
+1. Ask me to point out the **collection of source material** to begin with —
+   a folder or set of files (papers, PDFs, code, data). If none are here yet,
+   tell me to add them to this folder (or a subfolder) and wait.
+2. List what you find there so I can confirm the collection is right.
+3. Check `question.md`; ask me to confirm or fill in the research question.
+4. Only then run `helix run <that folder>` (or `.` for this folder).
+
+## Driving the pipeline
+
+`helix run <folder>` pauses at a gate after **every** stage. Relay each gate
+report to me and wait for my decision: proceed / send the run back to ANY
+earlier stage with feedback / stop. A snapshot is minted at every stage and
+every send-back. Use `--autonomous-until <stage>` or `--auto` only if I ask.
+
+## History & resume (git-style)
 
 - `helix snapshots list|show|diff|diagram <project>`
 - `helix snapshots resume <project> <id> [--at STAGE] [--branch NAME]`
 - `helix snapshots revert <project> <id>` restores that snapshot's artifacts.
 
-Atlas (the persistent wiki) compounds across projects:
+## Atlas (persistent wiki, compounds across projects)
+
 `helix status`, `helix atlas search <query>`, `helix log <project>`.
 """
 

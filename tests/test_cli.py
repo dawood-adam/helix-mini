@@ -29,4 +29,8 @@ def test_init_scaffold(tmp_path, monkeypatch):
     assert (tmp_path / "demo" / "question.md").exists()
     assert (tmp_path / "demo" / "helix.toml").exists()
     claude = (tmp_path / "demo" / "CLAUDE.md").read_text()
-    assert "Helix project" in claude and "helix run ." in claude
+    assert "Helix project" in claude and "helix run" in claude
+    # "start helix" must first direct the user to point out source material.
+    assert "start helix" in claude
+    assert "collection of source material" in claude
+    assert claude.index("source material") < claude.index("Driving the pipeline")
