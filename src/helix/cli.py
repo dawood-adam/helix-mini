@@ -217,6 +217,11 @@ def status():
         names = sorted(d.name for d in pdir.iterdir() if d.is_dir())
         if names:
             click.echo(f"Projects: {', '.join(names)}")
+    from .core.inbox import pending_count
+
+    pend = pending_count()
+    if pend:
+        click.echo(f"Inbox: {pend} file(s) waiting — run 'helix atlas ingest'")
 
 
 @cli.command("log")
@@ -235,6 +240,29 @@ def show_log(project):
 @cli.group()
 def atlas():
     """Atlas wiki commands."""
+
+
+@atlas.command("ingest")
+@click.argument("path", required=False)
+def atlas_ingest(path):
+    """Ingest the inbox (or one PATH). Drop files in atlas/inbox/ first.
+
+    Each new file becomes a searchable sources/ page; re-ingest is idempotent.
+    """
+    from .core.inbox import inbox_dir, ingest_inbox
+
+    inbox_dir()  # ensure the drop zone exists
+    summary = ingest_inbox(path=path)
+    n = len(summary["ingested"])
+    if not n and not summary["skipped"]:
+        click.echo(f"Nothing to ingest. Drop files into {inbox_dir()}")
+        return
+    for item in summary["ingested"]:
+        click.echo(f"  + {item['file']} -> {item['page']}")
+    click.echo(
+        f"Ingested {n}, skipped {summary['skipped']} (already known), "
+        f"{summary['pending']} still pending."
+    )
 
 
 @atlas.command("search")

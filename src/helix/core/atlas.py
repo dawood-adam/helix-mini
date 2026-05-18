@@ -34,7 +34,7 @@ class Atlas:
         self._ensure_structure()
 
     def _ensure_structure(self) -> None:
-        for d in ("sources", "concepts", "entities", "projects"):
+        for d in ("sources", "concepts", "entities", "projects", "inbox"):
             (self.root / d).mkdir(parents=True, exist_ok=True)
         if not (self.root / "index.md").exists():
             (self.root / "index.md").write_text("# Atlas Index\n")

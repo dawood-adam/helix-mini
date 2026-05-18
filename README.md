@@ -113,13 +113,19 @@ helix snapshots list | show | diff | diagram <project>
 helix snapshots resume my-research 5 --at planner --branch retry
 helix snapshots revert my-research 5          # restore that snapshot's files
 helix agent show the timeline for my-research # conversational, gated tools
+cp paper.pdf ./atlas/inbox/ && helix atlas ingest   # frictionless capture
 helix status | helix log <project> | helix atlas search <query>
 ```
+
+Drop any file into `atlas/inbox/` and `helix atlas ingest` turns it into a
+searchable Atlas source (idempotent, no LLM call). It's the zero‑effort way
+to feed Helix.
 
 ## Documentation
 
 | Doc | Read it for |
 |---|---|
+| [HELIX.md](HELIX.md) | The canonical system design, status, and roadmap |
 | [docs/usage.md](docs/usage.md) | Driving Helix (Claude Code or CLI), a run end to end, engines |
 | [docs/pipeline.md](docs/pipeline.md) | What each stage does in detail; authoring agents |
 | [docs/snapshots.md](docs/snapshots.md) | The git-style snapshot model |

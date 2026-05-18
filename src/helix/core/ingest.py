@@ -14,6 +14,29 @@ SUPPORTED_TEXT = {
 _MAX = 50_000
 
 
+def read_source(path: Path) -> str | None:
+    """Extract text from a supported file, size-capped. None if unreadable.
+
+    Shared by folder ingestion and the inbox drop-zone so the supported-format
+    and truncation rules live in one place.
+    """
+    suffix = path.suffix.lower()
+    if suffix in SUPPORTED_TEXT:
+        try:
+            content = path.read_text(errors="replace")
+        except Exception:
+            return None
+    elif suffix == ".pdf":
+        content = _read_pdf(path)
+    else:
+        return None
+    if content is None:
+        return None
+    if len(content) > _MAX:
+        content = content[:_MAX] + "\n\n[... truncated ...]"
+    return content
+
+
 def ingest_folder(folder: Path, raw_root: Path) -> list[Page]:
     """Read all files in ``folder``, copy to ``raw_root``, return Pages."""
     pages: list[Page] = []
@@ -27,20 +50,9 @@ def ingest_folder(folder: Path, raw_root: Path) -> list[Page]:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(fp, dest)
 
-        suffix = fp.suffix.lower()
-        if suffix in SUPPORTED_TEXT:
-            try:
-                content = fp.read_text(errors="replace")
-            except Exception:
-                continue
-        elif suffix == ".pdf":
-            content = _read_pdf(fp)
-        else:
-            continue
+        content = read_source(fp)
         if content is None:
             continue
-        if len(content) > _MAX:
-            content = content[:_MAX] + "\n\n[... truncated ...]"
         pages.append(
             Page(path=str(fp.relative_to(folder)), title=fp.stem, content=content)
         )
