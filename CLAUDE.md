@@ -1,57 +1,58 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository.
 
 ## Commands
 
 ```bash
-pip install -e ".[dev]"          # Install with test dependencies
-pip install -e ".[pdf]"          # Install with PDF support (pymupdf)
-pytest                           # Run all 66 tests
-pytest tests/test_sandbox.py -v  # Run a single test file
-pytest -k test_scout -v          # Run a single test by name
-helix-mini --help                # CLI entry point
+pip install -e .                 # CLI mode (dependency-light: click, dotenv, pyyaml)
+pip install -e '.[sdk,dev]'      # + LangGraph/litellm + pytest
+pytest -q                        # 17 tests (incl. dual-orchestrator conformance)
+PYTHONPATH="$PWD/src" pytest -q  # in a git worktree (editable install points at main src)
+helix --help                     # CLI entry point
 ```
 
-No linter is configured. Python >=3.11 required.
+Python >=3.11. No linter configured.
 
 ## Architecture
 
-Helix Mini runs a research pipeline over input folders: ingest files, identify approaches, critique, plan, build, validate — with every agent reading from and writing to a shared **Atlas** (an LLM-maintained markdown wiki that persists across projects).
+One dependency-light pipeline **core**, two **orchestrators** over it, two
+ways to **drive** it. See [docs/architecture.md](docs/architecture.md).
 
-### Package layout
+- **`helix/core/`** — imports with neither langgraph nor litellm.
+  `state.py` (`PipelineState` + `human_feedback`), `agents.py` (markdown agent
+  loader + table-driven context/mapping + deterministic registry),
+  `stages.py`, `gates.py` (HITL + `autonomy_until`), `transitions.py` (the
+  single `next_stage` resolver), `snapshots.py` (content-addressed DAG),
+  `atlas.py`/`ingest.py`, `decisions.py`.
+- **`helix/orchestrator/`** — `loop.py` (default; owns `advance`, the shared
+  per-step unit) and `langgraph_runner.py` (`helix[sdk]`; lazy langgraph).
+  Both call `loop.advance` → `transitions.next_stage`, so they cannot diverge.
+- **`helix/`** — `config.py` (all path/auth/model resolution; repo-local
+  defaults), `llm.py` (chokepoint; litellm lazy), `llm_cli.py`, `sandbox.py`,
+  `app.py` (facade), `cli.py`, `agent_iface.py` (fail-closed Agent SDK).
+- **`helix/builtin_agents/*.md`** — the six agents as markdown.
 
-- **`config/`** — Model selection (`ModelConfig` with per-stage overrides), provider registry (Anthropic/OpenAI), `.env` loading, setup wizard. All symbols re-exported from `config/__init__.py`.
-- **`atlas/`** — Markdown wiki: `store.py` (Atlas class with thread-safe read/write/index), `ingest.py` (file/PDF ingestion). Re-exported from `atlas/__init__.py`.
-- **`pipeline/`** — LangGraph workflow: `state.py` (ForgeState dataclass + GraphState TypedDict), `agents.py` (6 LLM agents), `graph.py` (12-node graph), `router.py` (gate decisions), `runner.py` (execution), `decisions.py`/`snapshots.py` (audit trail). Re-exported from `pipeline/__init__.py`.
-- **`sandbox.py`** — Validates all LLM-generated Atlas writes (path traversal, content size, batch limits) before they touch the filesystem.
-- **`llm.py`** — Thin litellm wrapper (`call_llm_json`). All LLM calls go through here.
-- **`docker.py`** — Optional Docker sandbox (non-root, read-only mounts, resource limits).
-- **`app.py`** — Facade: wires Atlas + config + runner.
-- **`cli.py`** — Click CLI: `run`, `setup`, `init`, `status`, `log`, `atlas search`.
+## Key invariants
 
-### Pipeline flow
-
-```
-scout → gate → critic_methods → gate → planner → gate → builder → gate → validator
-  → sanity_route: pass → critic_results → gate → END
-                   fail → builder (retry loop)
-```
-
-Each agent calls `call_llm_json()`, then passes `atlas_writes` through `sanitize_atlas_writes()` before writing to Atlas. The validator is deterministic (no LLM) — it checks results against validation bands.
-
-### Circular import caveat
-
-`sandbox.py` imports `PageWrite` from `atlas.store` (not `atlas/__init__`) to avoid a circular dependency: `sandbox → atlas → atlas.ingest → sandbox`.
+- `helix.core` and `helix.orchestrator.loop` MUST import without langgraph or
+  litellm (a manual `sys.modules` check guards this).
+- Both orchestrators route via `core.transitions.next_stage`. Add routing
+  logic there, never in an orchestrator. `tests/test_conformance.py` enforces
+  parity.
+- A snapshot must never call an LLM. `mint_snapshot` only serializes and
+  content-addresses; it reuses the stage's decision text as the digest.
+- All LLM output to disk passes `sandbox.sanitize_atlas_writes` /
+  `sanitize_code_artifacts`. `Atlas._safe_resolve` is defense-in-depth.
+- `sandbox.py` imports `PageWrite` from `core.atlas` (store only, no sandbox
+  import); `core.ingest` is the only module importing sandbox, so no cycle.
+- Auth precedence is OAuth-wins (`config.ModelConfig.default`); the agent gate
+  in `agent_iface.run_permission_decision` is fail-closed.
 
 ## Test patterns
 
-- Tests mock LLM calls with `@patch("helix_mini.pipeline.agents.call_llm_json")` returning `(dict, cost)` tuples.
-- `conftest.py` provides `tmp_atlas`, `sample_folder`, and `make_fake_llm_response` fixtures.
-- `test_lightspeed.py` has predefined fake responses for the full 5-agent pipeline sequence.
-
-## Security invariants
-
-- API key values must never appear in log output or subprocess argument lists. `_collect_env_vars()` uses `-e VAR_NAME` (no `=VALUE`) so Docker inherits from host.
-- All LLM output destined for the filesystem must pass through `sanitize_atlas_writes()`. Atlas also has `_safe_resolve()` as defense-in-depth.
-- `validate_ingest_source()` rejects symlinks pointing outside the input folder.
+- `tests/conftest.py` isolates `HELIX_HOME` to a tmp dir and patches
+  `helix.core.agents.call_llm_json`, routing fake JSON by system-prompt
+  keyword.
+- The conformance test runs one scenario through `engine="loop"` and
+  `engine="sdk"` and asserts identical results (skips if langgraph absent).

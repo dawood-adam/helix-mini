@@ -1,22 +1,24 @@
 [project]
-name = "helix-mini"
-version = "0.1.0"
-description = "Minimal Forge + Atlas: research pipelines with a persistent LLM wiki"
+name = "helix"
+version = "0.2.0"
+description = "A self-auditing research pipeline with a persistent wiki and git-style snapshots"
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=0.2",
-    "litellm>=1.0",
     "click>=8.0",
     "python-dotenv>=1.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+# SDK / library mode: the LangGraph orchestrator and the litellm API path.
+# CLI-driven mode (the default) needs none of this.
+sdk = ["langgraph>=0.2.45", "litellm>=1.0"]
 pdf = ["pymupdf>=1.24"]
 agent = ["claude-agent-sdk>=0.2,<0.3"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pyyaml>=6.0"]
 
 [project.scripts]
-helix-mini = "helix_mini.cli:cli"
+helix = "helix.cli:cli"
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -24,3 +26,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+helix = ["builtin_agents/*.md"]

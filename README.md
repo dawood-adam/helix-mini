@@ -1,71 +1,93 @@
-# helix-mini
+# Helix
 
-Run a research pipeline over folders of source material, capture every
-decision, and build a persistent LLM wiki (**Atlas**) that compounds across
-projects. A 12-node LangGraph pipeline (scout → critic → planner → builder →
-validator → critic-results) reads from and writes to a shared markdown wiki.
+Helix turns a folder of source material into validated, contextualized code.
+It runs six agents in sequence and stops for your review after each one. A
+persistent wiki accumulates what it learns across projects, and every step is
+saved as a git-style snapshot you can diff, branch, and resume.
 
-See [HELIX_MINI_PLAN.md](HELIX_MINI_PLAN.md) for the full design, or
-[docs/](docs/) for guides and reference.
+<p align="center">
+  <img src="docs/workflow_process_and_version_control_diagram.svg" alt="Helix workflow and version-control diagram" width="100%">
+</p>
+
+## How it works
+
+- **Six stages.** Scout, Methods Critic, Planner, Builder, Validator, Results
+  Critic. Validator is deterministic; the rest call an LLM.
+- **You are in the loop.** A gate runs after every stage. You can proceed,
+  send the run back to any earlier stage with a note, or stop. The note is
+  given to that stage when it re-runs.
+- **The Atlas wiki compounds.** Every stage reads and writes a markdown wiki
+  that persists across projects.
+- **Every step is a snapshot.** Snapshots are taken automatically. They cost
+  no LLM calls and form a branchable history you can resume from any point.
+- **Two engines, one pipeline.** By default an agentic CLI (such as Claude
+  Code) is the model, so no API key is needed. The same pipeline also runs as
+  a LangGraph graph for programmatic use.
 
 ## Install
 
-```bash
-pip install -e .                 # core
-pip install -e '.[pdf]'          # + PDF ingestion
-pip install -e '.[agent]'        # + `helix-mini agent`
-```
+| Command | Adds |
+|---|---|
+| `pip install -e .` | CLI mode. Dependency-light: `click`, `python-dotenv`, `pyyaml`. |
+| `pip install -e '.[sdk]'` | LangGraph orchestrator and the litellm API path. |
+| `pip install -e '.[agent]'` | `helix agent` (Claude Agent SDK). |
+| `pip install -e '.[pdf]'` | PDF ingestion. |
 
-## Quick start (Claude subscription — no API key)
-
-```bash
-# 1. one-time: mint a subscription token and store it securely
-claude setup-token                                   # prints a token
-mkdir -p ~/.helix-mini && chmod 700 ~/.helix-mini
-"${EDITOR:-nano}" ~/.helix-mini/.env                 # add one line:
-                                                     #   CLAUDE_CODE_OAUTH_TOKEN=<paste token>
-chmod 600 ~/.helix-mini/.env
-
-# 2. run — helix-mini loads ~/.helix-mini/.env automatically
-helix-mini init my-research                          # scaffold a folder
-helix-mini run ./my-research --lightspeed
-```
-
-That's it — no `export`, no wrapper, no quotes. `~/.helix-mini/.env` (mode
-`600`) is the one place helix-mini reads credentials from, every run.
-
-## Auth — pick one
-
-| Method | One-time setup | Notes |
-|---|---|---|
-| **Claude subscription** (recommended) | `claude setup-token`, then put `CLAUDE_CODE_OAUTH_TOKEN=…` in `~/.helix-mini/.env` | No API key. **OAuth wins**: a stray `ANTHROPIC_API_KEY` never silently bills you. |
-| **API key** | `helix-mini setup` (Anthropic/OpenAI) | Metered API billing. |
-| **Local** | install [Ollama](https://ollama.com) + `ollama pull qwen3:8b` | Fully offline, no account. |
-
-With any of these configured, `helix-mini run ./folder` just works — no flag
-needed. Explicit `--cli` / `--local` override the auto-choice.
-
-## Ways to run
+## Get started
 
 ```bash
-helix-mini run ./a ./b --lightspeed         # full pipeline (parallel), cheapest model
-helix-mini run ./a                          # full pipeline, default model, HITL gates
-helix-mini run ./a --cli claude             # force the Claude subscription engine
-helix-mini run ./a --local --model-size medium   # offline Qwen via Ollama
-helix-mini run ./a --sandbox                # inside a Docker sandbox
-helix-mini agent find what we know about PINNs   # conversational — no quotes
-helix-mini agent                            # interactive agent session
-helix-mini status                           # Atlas stats + projects
-helix-mini atlas search cardiac             # search the wiki
-helix-mini log my-research                  # decision log
+helix init my-research          # scaffold the project
+cd my-research
+
+claude setup-token              # one-time; prints a token
+mkdir -p .helix
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<paste token>" > .helix/.env
+chmod 600 .helix/.env
+
+# add your source files (PDF, markdown, code, data) to this folder, then:
+helix run .
 ```
 
-`helix-mini agent` auto-approves read-only Atlas tools; launching a pipeline
-run from the agent is human-gated (terminal confirmation).
+`helix run .` pauses after every stage and prints a report. Answer the prompt:
+`p` to proceed, `g` to send the run back to a stage with feedback, or `s` to
+stop.
+
+No Claude subscription? Run `helix setup` for an API key, or `helix run .
+--local` to use Ollama offline. Auth precedence is OAuth first: a subscription
+token always wins over a stray `ANTHROPIC_API_KEY`, so you are never billed
+for the API by accident.
+
+## Everyday commands
+
+```bash
+helix run .                                   # human-in-the-loop (default)
+helix run . --autonomous-until builder        # auto until a stage, then ask
+helix run . --auto                            # fully autonomous
+helix run . --engine sdk                      # same pipeline, LangGraph runner
+helix snapshots list my-research              # history
+helix snapshots diff my-research 3 7
+helix snapshots diagram my-research           # Mermaid gitGraph
+helix snapshots resume my-research 5 --at planner --branch retry
+helix snapshots revert my-research 5          # restore that snapshot's files
+helix agent show the timeline for my-research # conversational, gated
+helix status                                  # Atlas overview
+helix log my-research                         # decision log
+helix atlas search cardiac                    # search the wiki
+```
+
+## Documentation
+
+| Doc | Read it for |
+|---|---|
+| [docs/usage.md](docs/usage.md) | Day-to-day: gates, autonomy, engines, the agent |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit (with diagrams) |
+| [docs/snapshots.md](docs/snapshots.md) | The git-style snapshot model |
+| [docs/agents.md](docs/agents.md) | Editing or adding an agent |
+| [REFACTOR.md](REFACTOR.md) | What changed from helix-mini |
 
 ## Develop
 
 ```bash
-pip install -e '.[dev]'
-pytest -q          # 126 passed, 1 skipped (1 opt-in live test)
+pip install -e '.[sdk,dev]'
+pytest -q          # 17 passed, including dual-orchestrator conformance
 ```
