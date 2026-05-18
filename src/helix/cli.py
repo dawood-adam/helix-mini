@@ -422,6 +422,83 @@ def init(name):
     click.echo(f"  3. cd {name} && helix run . ")
 
 
+def _render_question(q):
+    """Render one elicitation Question over the terminal. The MCP server will
+    return the same Question object verbatim — same engine, different skin."""
+    if q.type in ("confirm", "bool"):
+        return click.confirm(q.prompt, default=False)
+    if q.type in ("choice", "id_ref"):
+        click.echo(q.prompt)
+        opts = q.options or []
+        for i, o in enumerate(opts, 1):
+            click.echo(f"  {i}. {o['label']}")
+        return opts[click.prompt("Choose", type=click.IntRange(1, len(opts))) - 1]["value"]
+    if q.type == "multi":
+        click.echo(q.prompt)
+        opts = q.options or []
+        for i, o in enumerate(opts, 1):
+            click.echo(f"  {i}. {o['label']}")
+        raw = click.prompt("Choose (comma-separated)")
+        return [opts[int(t) - 1]["value"] for t in raw.replace(" ", "").split(",")
+                if t.isdigit() and 1 <= int(t) <= len(opts)]
+    if q.type in ("int", "float"):
+        return click.prompt(q.prompt, type=int if q.type == "int" else float)
+    hint = f" (e.g. {', '.join(q.examples)})" if q.examples else ""
+    return click.prompt(q.prompt + hint)
+
+
+@cli.command()
+@click.argument("project_name", required=False)
+def start(project_name):
+    """Start a project conversationally — the ask/intent primitive.
+
+    Drives the same transport-agnostic state machine the MCP server will use.
+    """
+    from .intents import step
+
+    env = step("hx_start", answers={"project_name": project_name} if project_name else None)
+    while env.ask:
+        if env.warn:
+            click.echo(f"! {env.warn}", err=True)
+        q = env.ask.questions[0]
+        env = step("hx_start", session=env.ask.session,
+                   answers={q.key: _render_question(q)})
+
+    r = env.result
+    folder = Path(r["folder"])
+    if not folder.exists():
+        folder.mkdir(parents=True)
+        (folder / "question.md").write_text(
+            f"# Research Question\n\n{r['research_question']}\n")
+        (folder / "CLAUDE.md").write_text(CLAUDE_MD.format(stages=" → ".join(stages())))
+        (folder / "helix.toml").write_text(
+            '[atlas]\npath = "atlas"\n\n'
+            f"[limits]\ncost_cap = {config.COST_CAP_DEFAULT}\n"
+            f"call_cap = {config.CALL_CAP_DEFAULT}\n")
+
+    au = r["autonomy_until"]
+    flag = "--auto" if au == "END" else (f"--autonomous-until {au}" if au else "")
+    if not r["start"]:
+        click.echo(f"Prepared '{r['project']}'. Launch when ready:")
+        click.echo(f"  cd {folder} && helix run . {flag}".rstrip())
+        return
+
+    mc, label = _resolve_model_config(
+        lightspeed=False, local=False, local_recommended=False,
+        model_size=None, cli_engine=None, cli_model=None)
+    interactive = sys.stdin.isatty()
+    click.echo(f"Starting '{r['project']}' ({label}, {flag or 'full-HITL'})")
+    res = app.run(
+        folder.resolve(), model_config=mc, autonomy_until=au,
+        research_question=r["research_question"],
+        ask=_terminal_ask if interactive else None,
+        interactive=interactive, progress_fn=_progress)
+    status = "error" if res.error else (
+        "paused" if res.next_action == "paused-cost" else "done")
+    click.echo(f"  {res.project_name}: {status} "
+               f"(stages={len(res.completed_stages)}, cost=${res.cost_so_far:.4f})")
+
+
 @cli.command()
 def setup():
     """Interactive setup — pick a provider, enter and validate an API key."""

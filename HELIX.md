@@ -51,11 +51,66 @@ the relay/MCP roadmap below; the pillars themselves are built and working.
 | Atlas wiki (sources/concepts/entities/projects + index/log), sandboxed writes | **built** |
 | Snapshots v2: content‑addressed objects, parent/branch DAG, list/show/diff/diagram/revert/resume | **built** |
 | Dual orchestrator (plain loop default; LangGraph behind `helix[sdk]`) with conformance test | **built** |
-| **Frictionless `atlas/inbox/` ingest (manifest delta, idempotent)** | **built (this change)** |
+| Frictionless `atlas/inbox/` ingest (manifest delta, idempotent) | **built** |
+| **`ask` envelope + session state machine + `hx_start` intent (transport-agnostic)** | **built (this change)** |
 | Relay engine (interactive agent powers the stages; no `claude -p`) | planned — design frozen |
 | MCP‑centered control plane (pipeline/atlas/snapshot tools, fail‑closed) | planned — design frozen |
 | Localhost status + control dashboard | planned — design frozen |
 | Ecosystem optimizations (body search, bi‑temporal, auto‑routing recall) | planned — optional |
+
+## The `ask` envelope & intent tools (the universal primitive)
+
+Every operation answers with one uniform shape:
+
+```json
+{ "result": null|{...}, "ask": null|{...}, "next": "hx_...", "warn": null }
+```
+
+When `ask` is set, the front-end poses the questions, then calls the **same**
+operation again with the `session` token plus `answers`. The server is the
+state machine: it holds the partial answers (evicted after 30 min) and decides
+what to ask next from what it actually knows (existing projects, gates,
+snapshots). The user never learns a parameter surface; a full call with all
+args skips `ask` entirely, so power users are not penalised. Destructive
+acknowledgements are just a `type:"confirm"` question — there is no separate
+confirm-token plumbing.
+
+Nine question types: `string · int · float · bool · choice · multi · path ·
+id_ref · confirm` (with `pattern`/`min`/`max`/`options`/`examples`
+constraints, validated server-side).
+
+**Transport-agnostic by design — this is how MCP becomes central without
+waiting for the daemon.** `helix/intents.py` is pure: `step(intent, session,
+answers) -> Envelope`. Today the `helix` CLI renders that Envelope as terminal
+prompts (`helix start`). Tomorrow the MCP server returns the *same* Envelope
+verbatim to Claude Code. One engine, many skins; the wizard logic is written
+once.
+
+Intent tools (thin shells over the low-level ops; ~50 lines each):
+
+| Intent | User says | State |
+|---|---|---|
+| `hx_start` | "helix start", "new project" | **built** (name → description → control[+stage] → confirm) |
+| `hx_resume` | "resume", "where were we" | planned |
+| `hx_continue` | "what's next", "proceed" | planned |
+| `hx_branch` | "branch this", "try X separately" | planned |
+| `hx_finish` | "freeze for paper" | planned |
+| `hx_ingest` | "add this paper" | planned (wraps the built inbox ingest) |
+
+```
+You: helix start
+⏺ hx_start()                 → ask: project name?      You: smartphone-bp
+⏺ hx_start(session,...)      → ask: one-line desc?     You: rPPG BP estimation
+⏺ hx_start(session,...)      → ask: how to run?        You: 2 (auto until a stage)
+⏺ hx_start(session,...)      → ask: until which stage? You: builder
+⏺ hx_start(session,...)      → ask: start now?         You: yes
+⏺ hx_start(session,...)      → {result:{autonomy_until:"builder"...}, next:"pipeline_status"}
+```
+
+`control` maps to the existing engine: step → full HITL, `auto_to` →
+`autonomy_until=<stage>`, auto → `END`. (Pre-declared *sequences* — "scout 3×
+then critic" — are the Plan primitive, a Forge Phase-C item; `hx_start` offers
+the three modes that map cleanly to today's pipeline so nothing fake ships.)
 
 ## Pillar 1 — Forge (the pipeline)
 
@@ -206,9 +261,10 @@ foundations.
 | Phase | Scope | State |
 |---|---|---|
 | — | Pillars (Forge, Atlas, Snapshots), dual orchestrator, HITL | done |
-| **A** | Frictionless inbox ingest + manifest + CLI | **done (this change)** |
+| **A** | Frictionless inbox ingest + manifest + CLI | done |
+| **A2** | `ask` envelope + session store + `hx_start` intent + `helix start` (transport-agnostic) | **done (this change)** |
 | B | Relay coroutine seam (async LLM + gate awaits), behind current API | next |
-| C | `helix serve` MCP daemon + pipeline tools + reused fail‑closed gate | |
+| C | `helix serve` MCP daemon — returns the same Envelopes; intents become MCP tools; reused fail‑closed gate | |
 | D | Atlas + snapshot tools on the server | |
 | E | Localhost dashboard (`/state`, `/decision`) | |
 | F | Remove `helix agent`; relay default inside Claude Code; docs | |
