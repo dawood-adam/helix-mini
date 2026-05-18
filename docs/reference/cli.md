@@ -84,13 +84,17 @@ helix-mini agent [OPTIONS] [PROMPT]...
 |--------|------|---------|-------------|
 | `--max-turns` | int | `30` | Max agent turns before the session stops |
 
-helix-mini ops are exposed as in-process MCP tools: `atlas_search`,
-`atlas_status`, `decision_log` (auto-approved, read-only) and `run_pipeline`
-(expensive — gated by a terminal confirmation; denied non-interactively). The
-command clears the nested-session guard so it works inside Claude Code, and
-prefers subscription auth when `CLAUDE_CODE_OAUTH_TOKEN` is set. Requires the
-optional extra: `pip install 'helix-mini[agent]'` (a clear error is shown if
-the SDK is missing). See [agent_sdk](agent_sdk.md).
+helix-mini ops are exposed as in-process MCP tools. Read-only and
+auto-approved: `atlas_search`, `atlas_status`, `decision_log`,
+`snapshot_list`, `snapshot_show`, `snapshot_diff`, `snapshot_timeline`.
+Expensive and **gated** by a terminal confirmation (denied
+non-interactively): `run_pipeline`, `resume_pipeline`. The gate is
+fail-closed — every other tool (incl. the SDK's `Bash`/`Write`/`Edit`) is
+denied and hard-blocked. The command clears the nested-session guard so it
+works inside Claude Code, and prefers subscription auth when
+`CLAUDE_CODE_OAUTH_TOKEN` is set. Requires the optional extra:
+`pip install 'helix-mini[agent]'` (a clear error is shown if the SDK is
+missing). See [agent_sdk](agent_sdk.md).
 
 ---
 
@@ -168,3 +172,65 @@ helix-mini atlas search QUERY
 - `QUERY` (required) — Space-separated search keywords.
 
 **Output:** Matching pages with title, path, and a 500-character content preview.
+
+---
+
+## `helix-mini snapshots`
+
+Git-style snapshot history for a project. Snapshots are immutable, numbered
+full-`ForgeState` captures minted once per pipeline node (plus one per refine
+builder pass) under `~/.helix-mini/atlas/projects/<name>/.snapshots/`. See the
+[Snapshots guide](../guides/snapshots.md) for the full git analogy.
+
+### `helix-mini snapshots list PROJECT`
+
+List every snapshot in numeric order (like `git log`). Each line: number,
+timestamp, stage, cumulative cost, verdict, refine iterations (`ERROR` if the
+state carried an error).
+
+### `helix-mini snapshots show PROJECT NUM`
+
+Show one snapshot's key state (like `git show`): stage, cost, verdict,
+build iterations, chosen approach, plan title, and candidate/artifact/result
+counts.
+
+### `helix-mini snapshots diff PROJECT A B`
+
+Field-level diff of two snapshots (like `git diff A B`). Scalars are compared
+by value; list fields by length. Prints `no tracked differences` if equal.
+
+### `helix-mini snapshots diagram PROJECT [--output PATH]`
+
+Render the history as a standard Mermaid `gitGraph` (one commit per snapshot,
+labelled `snap-N <stage> $<cost> [verdict]`). Echoes the fenced Mermaid block
+and also writes it to a file:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--output` | path | `<project_dir>/timeline.md` | Where to write the Mermaid file |
+
+### `helix-mini snapshots resume PROJECT NUM [OPTIONS]`
+
+Re-enter the pipeline seeded with the snapshot's full state. Cost/history
+carry forward; run controls are refreshed.
+
+**Arguments:**
+- `PROJECT` (required) — Project name.
+- `NUM` (required, int) — Snapshot number to resume from.
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--at` | text | snapshot's stage | Pipeline node to re-enter at (one of the 12 nodes) |
+| `--lightspeed` | flag | off | Auto-gates + cheapest model |
+| `--local` | flag | off | All stages use local Qwen via Ollama |
+| `--local-recommended` | flag | off | Simple stages local, critical stages cloud |
+| `--model-size` | choice | `None` | Qwen size: `small`, `medium`, `large` |
+| `--cli` | text | `None` | Pilot via an LLM CLI engine (e.g. `claude`) |
+| `--cli-model` | text | `None` | Engine-native model for `--cli` |
+| `--max-iterations` | int | `3` | Max `builder`↔`critic_results` refine loops |
+
+The engine options are the **same shared set** as `helix-mini run` (one
+`_engine_options` definition applied to both commands). An unknown `--at`
+stage is rejected with the valid node list.

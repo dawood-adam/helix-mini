@@ -123,6 +123,7 @@ def run_project(
     ask_fn=None,
     home: Path | None = None,
     progress_fn=None,
+    max_iterations: int = 3,
 ) -> ForgeState
 ```
 
@@ -135,10 +136,63 @@ def run_project(
 - `ask_fn` — Callback for interactive gates. Currently unused by CLI (always `None`).
 - `home` (`Path | None`) — Override for `HELIX_HOME`.
 - `progress_fn` — Called at each stage with `(stage, project_name, cost)`.
+- `max_iterations` (`int`) — Cap on the `builder`↔`critic_results` refine loop. Sizes the LangGraph `recursion_limit` (`30 + max_iterations * 8`).
 
 **Returns:** `ForgeState` with final pipeline results.
 
-**Behavior:** Creates `Agents`, builds the 12-node LangGraph, compiles it, and invokes with an initial state. If `CostCapExceeded` is raised, returns a `ForgeState` with the error message.
+**Behavior:** Creates `Agents`, builds a blank initial state, and delegates to the shared `_execute()` core (compile + invoke from `start_at="scout"`). If `CostCapExceeded` is raised, returns a `ForgeState` with the error message.
+
+---
+
+## `resume_project`
+
+**Module:** `helix_mini.pipeline.runner`
+
+```python
+def resume_project(
+    project_name: str,
+    atlas: Atlas,
+    model_config: ModelConfig,
+    *,
+    snapshot_state: dict,
+    start_at: str,
+    lightspeed: bool = False,
+    ask_fn=None,
+    home: Path | None = None,
+    progress_fn=None,
+    max_iterations: int = 3,
+) -> ForgeState
+```
+
+Resume a project from a saved snapshot, re-entering the graph at `start_at`
+(any of the 12 `GRAPH_NODES`) seeded with the snapshot's full `ForgeState`.
+
+**Parameters:**
+- `snapshot_state` (`dict`) — The `state` dict from a loaded snapshot. Used as the initial graph state.
+- `start_at` (`str`) — Node to re-enter at. Raises `ValueError` (with the valid node list) if not in `GRAPH_NODES`.
+- Other params mirror `run_project`.
+
+**Behavior:** Copies `snapshot_state`, then overrides the run controls
+(`project_name`, `autonomy`, `max_iterations`, `call_cap`, `error`,
+`current_stage`) so cost/history carry forward (git-like) while autonomy and
+caps are refreshed. Delegates to the shared `_execute()` core.
+
+---
+
+## `_execute`
+
+**Module:** `helix_mini.pipeline.runner`
+
+```python
+def _execute(
+    *, agents, home, ask_fn, progress_fn,
+    initial_state: GraphState, start_at: str, max_iterations: int,
+) -> ForgeState
+```
+
+Shared core for both `run_project` and `resume_project`: builds the graph from
+`start_at`, compiles, invokes with `recursion_limit = 30 + max_iterations * 8`,
+and converts `CostCapExceeded` into an error `ForgeState`.
 
 ---
 
@@ -155,10 +209,11 @@ async def run_parallel(
     research_question: str = "",
     home: Path | None = None,
     progress_fn=None,
+    max_iterations: int = 3,
 ) -> list[ForgeState]
 ```
 
-Runs `run_project()` for each folder concurrently via `asyncio.gather()` in a thread executor. All runs share the same `Atlas` instance (writes are thread-safe).
+Runs `run_project()` for each folder concurrently via `asyncio.gather()` in a thread executor (forwarding `max_iterations`). All runs share the same `Atlas` instance (writes are thread-safe).
 
 ---
 
@@ -167,10 +222,32 @@ Runs `run_project()` for each folder concurrently via `asyncio.gather()` in a th
 **Module:** `helix_mini.pipeline.graph`
 
 ```python
-def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> StateGraph
+def build_graph(
+    agents: Agents, home: Path, ask_fn=None, progress_fn=None,
+    start_at: str = "scout",
+) -> StateGraph
 ```
 
-Constructs the 12-node LangGraph `StateGraph`. Returns an uncompiled graph — call `.compile()` before invoking.
+Constructs the 12-node LangGraph `StateGraph`. `start_at` sets the entry point
+(`graph.set_entry_point(start_at)`): `"scout"` for a fresh run, or any node to
+resume. Returns an uncompiled graph — call `.compile()` before invoking.
+
+---
+
+## `GRAPH_NODES`
+
+**Module:** `helix_mini.pipeline.graph`
+
+```python
+GRAPH_NODES = (
+    "scout", "gate_scope", "critic_methods", "gate_methods",
+    "planner", "gate_plan", "builder", "gate_build",
+    "validator", "sanity_route", "critic_results", "gate_results",
+)
+```
+
+The 12 valid pipeline nodes — the allowed `start_at` / resume targets.
+`resume_project` validates `start_at` against this tuple.
 
 ---
 
@@ -302,4 +379,50 @@ Reads and returns a snapshot as a dict.
 def list_snapshots(project_dir: Path) -> list[Path]
 ```
 
-Returns sorted list of all `snap-*.json` files for a project.
+Returns all `snap-*.json` files for a project, ordered by snapshot number (so
+`snap-10` follows `snap-9`, not lexically before `snap-2`).
+
+### `_snap_num` / `find_snapshot`
+
+```python
+def _snap_num(path: Path) -> int            # N from snap-N.json (0 if unparseable)
+def find_snapshot(project_dir: Path, num: int) -> Path | None
+```
+
+`find_snapshot` returns the path to `snap-<num>.json` if it exists, else
+`None`. Used by the CLI/agent to resolve a snapshot by number.
+
+### `snapshot_summary`
+
+```python
+def snapshot_summary(snap: dict) -> dict
+```
+
+Compact, display-friendly view of one loaded snapshot:
+`{stage, timestamp, cost, build_iterations, verdict, approaches, artifacts,
+error}`. Backs `snapshots list`, `show`, and the diagram labels.
+
+### `diff_snapshots`
+
+```python
+def diff_snapshots(a: dict, b: dict) -> dict[str, tuple]
+```
+
+Field-level diff returning `{field: (old, new)}`. Scalars
+(`current_stage`, `verdict`, `build_iterations`, `cost_so_far`,
+`chosen_approach_id`, `next_action`, `error`) are compared by value; list
+fields (`candidate_approaches`, `code_artifacts`, `experiment_results`,
+`critiques`, `completed_stages`, `sanity_check_flags`) by length — a readable
+git-status-style diff, not a deep dump. `{}` means no tracked differences.
+
+### `snapshot_gitgraph`
+
+```python
+def snapshot_gitgraph(snaps: list[dict]) -> str
+```
+
+Renders snapshots as a fenced **Mermaid `gitGraph`** — one
+`commit id: "snap-N <stage> $<cost> [verdict]"` per snapshot. Refine-loop
+passes appear as repeated builder/critic commits. Returns a placeholder
+`(no snapshots yet)` commit for an empty history. Standard Mermaid, so it
+renders unchanged in GitHub/Obsidian/VS Code/`mermaid.live`.

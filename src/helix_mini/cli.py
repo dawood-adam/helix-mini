@@ -20,6 +20,112 @@ def _cli_progress(stage: str, project: str, cost: float) -> None:
     click.echo(f"  [{project}] {stage} (${cost:.4f})")
 
 
+def _project_dir(project: str) -> Path:
+    return HELIX_HOME / "atlas" / "projects" / project
+
+
+def _resolve_model_config(
+    *,
+    lightspeed: bool,
+    local: bool = False,
+    local_recommended: bool = False,
+    model_size: str | None = None,
+    cli_engine: str | None = None,
+    cli_model: str | None = None,
+) -> tuple[ModelConfig, str]:
+    """Resolve (ModelConfig, mode_label) from engine flags.
+
+    Shared by `run` and `snapshots resume`. Raises click.ClickException on an
+    unrecoverable misconfiguration (missing engine binary, no auth, etc.).
+    """
+    if cli_engine:
+        from .llm_cli import CLIEngineError, get_engine
+
+        try:
+            eng = get_engine(cli_engine)
+        except CLIEngineError as e:
+            raise click.ClickException(str(e))
+        if not eng.available():
+            raise click.ClickException(
+                f"CLI engine '{cli_engine}' is not on PATH (looked for "
+                f"'{eng.bin}'). Install it first."
+            )
+        return (
+            ModelConfig.cli(cli_engine, native_model=cli_model),
+            f"cli:{cli_engine}" + (f":{cli_model}" if cli_model else ""),
+        )
+    if local or local_recommended:
+        size = model_size or "medium"
+        if local:
+            return ModelConfig.local(size), f"local ({QWEN_SIZES[size]})"
+        if not has_api_key():
+            raise click.ClickException(
+                "--local-recommended needs an API key for critical stages. "
+                "Run 'helix-mini setup' first, or use --local."
+            )
+        return (
+            ModelConfig.local_recommended(size, lightspeed=lightspeed),
+            f"local-recommended ({QWEN_SIZES[size]} + cloud)",
+        )
+
+    model_config = ModelConfig.default(lightspeed=lightspeed)
+    if model_config is None:
+        raise click.ClickException(
+            "No Claude OAuth token or API key found. Run 'claude setup-token' "
+            "and export CLAUDE_CODE_OAUTH_TOKEN to use your Claude "
+            "subscription, or 'helix-mini setup' for an API key, or --local."
+        )
+    if model_config.model.startswith("cli/"):
+        from .llm_cli import get_engine
+
+        if not get_engine("claude").available():
+            raise click.ClickException(
+                "Claude CLI not found on PATH — reinstall Claude Code."
+            )
+        return model_config, "claude-subscription" + (
+            " lightspeed" if lightspeed else ""
+        )
+    return model_config, ("lightspeed" if lightspeed else "normal")
+
+
+def _engine_options(func):
+    """Shared engine-selection options for `run` and `snapshots resume`.
+
+    Keeps the two commands' engine flags identical from one definition.
+    """
+    opts = [
+        click.option("--lightspeed", is_flag=True,
+                     help="Auto-gates + cheapest model"),
+        click.option("--local", is_flag=True,
+                     help="Run all stages locally using Qwen via Ollama "
+                     "(no API key needed)"),
+        click.option("--local-recommended", "local_recommended", is_flag=True,
+                     help="Run simple stages locally (Qwen), critical stages "
+                     "via cloud API"),
+        click.option("--model-size",
+                     type=click.Choice(list(QWEN_SIZES.keys()),
+                                       case_sensitive=False),
+                     default=None,
+                     help="Qwen model size for local inference "
+                     "(small/medium/large)"),
+        click.option("--cli", "cli_engine", default=None, metavar="ENGINE",
+                     help="Pilot the pipeline through an LLM CLI (e.g. "
+                     "'claude'). No API key needed; the CLI handles its own "
+                     "auth. Define more in config.toml."),
+        click.option("--cli-model", "cli_model", default=None, metavar="MODEL",
+                     help="Engine-native model for --cli (e.g. 'opus', "
+                     "'sonnet', 'haiku')."),
+        click.option("--max-iterations", default=3, show_default=True,
+                     metavar="N",
+                     help="Max builder<->critic_results refine loops (0 "
+                     "disables the loop). Auto under --lightspeed; otherwise "
+                     "prompts ship/iterate/abandon."),
+    ]
+    for opt in reversed(opts):
+        func = opt(func)
+    return func
+
+
 @click.group()
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
 def cli(verbose: bool) -> None:
@@ -34,42 +140,14 @@ def cli(verbose: bool) -> None:
 
 @cli.command()
 @click.argument("folders", nargs=-1, required=True, type=click.Path(exists=True))
-@click.option("--lightspeed", is_flag=True, help="Auto-gates + cheapest model")
 @click.option("-q", "--question", default="", help="Research question to guide analysis")
 @click.option("--sandbox", is_flag=True, help="Run inside a Docker sandbox")
-@click.option(
-    "--local", is_flag=True,
-    help="Run all stages locally using Qwen via Ollama (no API key needed)",
-)
-@click.option(
-    "--local-recommended", "local_recommended", is_flag=True,
-    help="Run simple stages locally (Qwen), critical stages via cloud API",
-)
-@click.option(
-    "--model-size",
-    type=click.Choice(list(QWEN_SIZES.keys()), case_sensitive=False),
-    default=None,
-    help="Qwen model size for local inference (small/medium/large)",
-)
-@click.option(
-    "--cli", "cli_engine", default=None, metavar="ENGINE",
-    help="Pilot the pipeline through an LLM CLI (e.g. 'claude'). No API key "
-    "needed; the CLI handles its own auth. Define more in config.toml.",
-)
-@click.option(
-    "--cli-model", "cli_model", default=None, metavar="MODEL",
-    help="Engine-native model for --cli (e.g. 'opus', 'sonnet', 'haiku').",
-)
-@click.option(
-    "--max-iterations", default=3, show_default=True, metavar="N",
-    help="Max builder↔critic_results refine loops (0 disables the loop). "
-    "Auto under --lightspeed; otherwise prompts ship/iterate/abandon.",
-)
+@_engine_options
 def run(
     folders: tuple[str, ...],
-    lightspeed: bool,
     question: str,
     sandbox: bool,
+    lightspeed: bool,
     local: bool,
     local_recommended: bool,
     model_size: str | None,
@@ -78,63 +156,10 @@ def run(
     max_iterations: int,
 ) -> None:
     """Run Forge pipeline on one or more folders."""
-    # Resolve model config based on flags
-    if cli_engine:
-        from .llm_cli import CLIEngineError, get_engine
-
-        try:
-            eng = get_engine(cli_engine)
-        except CLIEngineError as e:
-            click.echo(str(e), err=True)
-            sys.exit(1)
-        if not eng.available():
-            click.echo(
-                f"CLI engine '{cli_engine}' is not on PATH (looked for "
-                f"'{eng.bin}'). Install it first.",
-                err=True,
-            )
-            sys.exit(1)
-        model_config = ModelConfig.cli(cli_engine, native_model=cli_model)
-        mode_label = f"cli:{cli_engine}" + (f":{cli_model}" if cli_model else "")
-    elif local or local_recommended:
-        size = model_size or "medium"
-        if local:
-            model_config = ModelConfig.local(size)
-            mode_label = f"local ({QWEN_SIZES[size]})"
-        else:
-            if not has_api_key():
-                click.echo("--local-recommended needs an API key for critical stages.")
-                click.echo("Run 'helix-mini setup' first, or use --local for fully local.")
-                sys.exit(1)
-            model_config = ModelConfig.local_recommended(size, lightspeed=lightspeed)
-            mode_label = f"local-recommended ({QWEN_SIZES[size]} + cloud)"
-    else:
-        model_config = ModelConfig.default(lightspeed=lightspeed)
-        if model_config is None:
-            click.echo("No Claude OAuth token or API key found.")
-            click.echo(
-                "Run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN "
-                "to use your Claude subscription,"
-            )
-            click.echo(
-                "or 'helix-mini setup' for an API key, or --local for a "
-                "local Qwen model."
-            )
-            sys.exit(1)
-        if model_config.model.startswith("cli/"):
-            from .llm_cli import get_engine
-
-            if not get_engine("claude").available():
-                click.echo(
-                    "Claude CLI not found on PATH — reinstall Claude Code.",
-                    err=True,
-                )
-                sys.exit(1)
-            mode_label = "claude-subscription" + (
-                " lightspeed" if lightspeed else ""
-            )
-        else:
-            mode_label = "lightspeed" if lightspeed else "normal"
+    model_config, mode_label = _resolve_model_config(
+        lightspeed=lightspeed, local=local, local_recommended=local_recommended,
+        model_size=model_size, cli_engine=cli_engine, cli_model=cli_model,
+    )
 
     folder_paths = [Path(f).resolve() for f in folders]
 
@@ -250,6 +275,147 @@ def atlas_search(query: str) -> None:
         if len(page.content) > 500:
             preview += "\n..."
         click.echo(preview)
+
+
+@cli.group()
+def snapshots() -> None:
+    """Git-style snapshot history: list / show / diff / diagram / resume."""
+
+
+def _require_snap(project: str, num: int) -> dict:
+    from .pipeline.snapshots import find_snapshot, load_snapshot
+
+    p = find_snapshot(_project_dir(project), num)
+    if p is None:
+        raise click.ClickException(
+            f"No snap-{num} for project '{project}'. "
+            f"Try: helix-mini snapshots list {project}"
+        )
+    return load_snapshot(p)
+
+
+@snapshots.command("list")
+@click.argument("project")
+def snap_list(project: str) -> None:
+    """List a project's snapshots (like `git log`)."""
+    from .pipeline.snapshots import (
+        _snap_num, list_snapshots, load_snapshot, snapshot_summary,
+    )
+
+    snaps = list_snapshots(_project_dir(project))
+    if not snaps:
+        click.echo(f"No snapshots for '{project}'. Run the pipeline first.")
+        return
+    for p in snaps:
+        s = snapshot_summary(load_snapshot(p))
+        click.echo(
+            f"snap-{_snap_num(p):<3} {s['timestamp']:<27} "
+            f"{s['stage']:<15} ${s['cost']:.4f}  "
+            f"verdict={s['verdict']}  iters={s['build_iterations']}"
+            + ("  ERROR" if s["error"] else "")
+        )
+
+
+@snapshots.command("show")
+@click.argument("project")
+@click.argument("num", type=int)
+def snap_show(project: str, num: int) -> None:
+    """Show one snapshot's key state (like `git show`)."""
+    snap = _require_snap(project, num)
+    st = snap.get("state", {})
+    click.echo(f"snap-{num}  stage={snap.get('stage')}  {snap.get('timestamp')}")
+    click.echo(f"  cost_so_far     : ${float(st.get('cost_so_far', 0) or 0):.4f}")
+    click.echo(f"  verdict         : {st.get('verdict') or '-'}")
+    click.echo(f"  build_iterations: {st.get('build_iterations', 0)}")
+    click.echo(f"  chosen_approach : {st.get('chosen_approach_id') or '-'}")
+    click.echo(f"  plan            : {st.get('project_plan', {}).get('title', '-')}")
+    click.echo(f"  candidates      : {len(st.get('candidate_approaches') or [])}")
+    click.echo(f"  artifacts       : {len(st.get('code_artifacts') or [])}")
+    click.echo(f"  results         : {len(st.get('experiment_results') or [])}")
+    click.echo(f"  completed_stages: {', '.join(st.get('completed_stages') or []) or '-'}")
+    if st.get("error"):
+        click.echo(f"  error           : {st['error']}")
+
+
+@snapshots.command("diff")
+@click.argument("project")
+@click.argument("a", type=int)
+@click.argument("b", type=int)
+def snap_diff(project: str, a: int, b: int) -> None:
+    """Diff two snapshots' state (like `git diff A B`)."""
+    from .pipeline.snapshots import diff_snapshots
+
+    changes = diff_snapshots(_require_snap(project, a), _require_snap(project, b))
+    if not changes:
+        click.echo(f"snap-{a} -> snap-{b}: no tracked differences")
+        return
+    click.echo(f"snap-{a} -> snap-{b}:")
+    for field, (old, new) in changes.items():
+        click.echo(f"  {field}: {old!r} -> {new!r}")
+
+
+@snapshots.command("diagram")
+@click.argument("project")
+@click.option("--output", "output", type=click.Path(), default=None,
+              help="Write the Mermaid file here (default: the project dir)")
+def snap_diagram(project: str, output: str | None) -> None:
+    """Render the snapshot history as a Mermaid gitGraph."""
+    from .pipeline.snapshots import (
+        list_snapshots, load_snapshot, snapshot_gitgraph,
+    )
+
+    snaps = [load_snapshot(p) for p in list_snapshots(_project_dir(project))]
+    mermaid = snapshot_gitgraph(snaps)
+    dest = Path(output) if output else _project_dir(project) / "timeline.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(f"# {project} — snapshot timeline\n\n{mermaid}\n")
+    click.echo(mermaid)
+    click.echo(f"\nWrote {dest}", err=True)
+
+
+@snapshots.command("resume")
+@click.argument("project")
+@click.argument("num", type=int)
+@click.option("--at", "start_at", default=None, metavar="STAGE",
+              help="Pipeline node to re-enter at (default: the snapshot's stage)")
+@_engine_options
+def snap_resume(
+    project: str, num: int, start_at: str | None, lightspeed: bool,
+    local: bool, local_recommended: bool, model_size: str | None,
+    cli_engine: str | None, cli_model: str | None, max_iterations: int,
+) -> None:
+    """Resume the forge cycle from a snapshot, re-entering at a chosen stage."""
+    snap = _require_snap(project, num)
+    st = snap.get("state", {})
+    stage = start_at or snap.get("stage") or st.get("current_stage") or "scout"
+
+    model_config, mode_label = _resolve_model_config(
+        lightspeed=lightspeed, local=local, local_recommended=local_recommended,
+        model_size=model_size, cli_engine=cli_engine, cli_model=cli_model,
+    )
+
+    from .pipeline.runner import resume_project
+
+    click.echo(
+        f"Resuming '{project}' at '{stage}' from snap-{num} (mode={mode_label})"
+    )
+    try:
+        result = resume_project(
+            project, Atlas(HELIX_HOME / "atlas"), model_config,
+            snapshot_state=st, start_at=stage, lightspeed=lightspeed,
+            home=HELIX_HOME, progress_fn=_cli_progress,
+            max_iterations=max_iterations,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    status = "error" if result.error else "done"
+    click.echo(
+        f"\n  {result.project_name}: {status} "
+        f"(stages: {len(result.completed_stages)}, "
+        f"cost: ${result.cost_so_far:.4f})"
+    )
+    if result.error:
+        click.echo(f"    Error: {result.error}")
 
 
 @cli.command()

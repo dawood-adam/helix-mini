@@ -11,3 +11,4 @@ Task-oriented tutorials for common helix-mini workflows.
 | [Driving helix-mini with a Claude Agent](claude-agent.md) | Operate helix-mini conversationally via `helix-mini agent` |
 | [Docker Sandbox Mode](docker-sandbox.md) | Run in an isolated Docker container |
 | [Working with the Atlas](working-with-atlas.md) | Search, explore, and inspect the wiki after runs |
+| [Snapshots as Git-Style Version Control](snapshots.md) | Browse / diff / diagram the history and resume the forge cycle |

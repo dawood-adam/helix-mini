@@ -17,6 +17,13 @@ from .state import GraphState, to_state
 
 log = logging.getLogger(__name__)
 
+# All pipeline nodes, in order — also the valid `resume` entry points.
+GRAPH_NODES = (
+    "scout", "gate_scope", "critic_methods", "gate_methods",
+    "planner", "gate_plan", "builder", "gate_build",
+    "validator", "sanity_route", "critic_results", "gate_results",
+)
+
 
 class CostCapExceeded(Exception):
     """Raised when cumulative LLM cost exceeds the configured cap."""
@@ -47,7 +54,10 @@ def _decisions_path(home: Path, project_name: str) -> Path:
     return _project_dir(home, project_name) / ".decisions.json"
 
 
-def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> StateGraph:
+def build_graph(
+    agents: Agents, home: Path, ask_fn=None, progress_fn=None,
+    start_at: str = "scout",
+) -> StateGraph:
     """Build the 12-node Forge pipeline as a LangGraph StateGraph."""
 
     def _progress(stage: str, project: str, cost: float) -> None:
@@ -324,7 +334,7 @@ def build_graph(agents: Agents, home: Path, ask_fn=None, progress_fn=None) -> St
     graph.add_node("gate_results", gate_results_node)
 
     # Edges: linear pipeline with sanity loop
-    graph.set_entry_point("scout")
+    graph.set_entry_point(start_at)  # "scout" for a fresh run; any node to resume
     graph.add_edge("scout", "gate_scope")
     graph.add_edge("gate_scope", "critic_methods")
     graph.add_edge("critic_methods", "gate_methods")

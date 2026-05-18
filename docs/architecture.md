@@ -2,7 +2,7 @@
 
 ## System Summary
 
-Helix Mini is a Python CLI tool that runs research pipelines over input folders of source material (papers, code, data). Each folder is processed through six LLM-powered agents — scout, critic, planner, builder, validator, and critic-results — orchestrated as a 12-node [LangGraph](https://github.com/langchain-ai/langgraph) state graph. Every agent reads from and writes to a shared **Atlas**, a persistent markdown wiki at `~/.helix-mini/atlas/` that accumulates knowledge across projects. Every LLM call funnels through one chokepoint (`llm.py`), so inference can be served by [litellm](https://github.com/BerriAI/litellm) (Anthropic/OpenAI/Ollama) **or** by spawning the `claude` CLI (`llm_cli.py`, the `cli/claude` engine) — the same pipeline, no forked path. helix-mini can also be *driven* conversationally by a Claude agent (`agent_sdk.py`, the Claude Agent SDK). Auth is API key, local Ollama, or a Claude **subscription** via `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`), with OAuth-wins precedence. The system records a full audit trail of decisions and state snapshots for every pipeline run.
+Helix Mini is a Python CLI tool that runs research pipelines over input folders of source material (papers, code, data). Each folder is processed through six LLM-powered agents — scout, critic, planner, builder, validator, and critic-results — orchestrated as a 12-node [LangGraph](https://github.com/langchain-ai/langgraph) state graph. Every agent reads from and writes to a shared **Atlas**, a persistent markdown wiki at `~/.helix-mini/atlas/` that accumulates knowledge across projects. Every LLM call funnels through one chokepoint (`llm.py`), so inference can be served by [litellm](https://github.com/BerriAI/litellm) (Anthropic/OpenAI/Ollama) **or** by spawning the `claude` CLI (`llm_cli.py`, the `cli/claude` engine) — the same pipeline, no forked path. helix-mini can also be *driven* conversationally by a Claude agent (`agent_sdk.py`, the Claude Agent SDK). Auth is API key, local Ollama, or a Claude **subscription** via `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`), with OAuth-wins precedence. The system records a full audit trail of decisions and immutable, numbered state snapshots for every pipeline run — usable like git (`list`/`show`/`diff`/`diagram`), and any snapshot can be **resumed** to re-enter the pipeline at a chosen stage.
 
 ---
 
@@ -19,16 +19,16 @@ Helix Mini is a Python CLI tool that runs research pipelines over input folders 
 | **pipeline/agents** | `src/helix_mini/pipeline/agents.py` | `Agents` class with 6 agent methods and system prompt constants | atlas, llm, sandbox, config |
 | **pipeline/graph** | `src/helix_mini/pipeline/graph.py` | `build_graph()` — 12-node LangGraph `StateGraph` with conditional routing | langgraph |
 | **pipeline/router** | `src/helix_mini/pipeline/router.py` | `gate_decision()`, `sanity_route()`, `make_autonomy()` — pure decision rules, no LLM | pipeline/state |
-| **pipeline/runner** | `src/helix_mini/pipeline/runner.py` | `run_project()` (single folder) and `run_parallel()` (multi-folder via asyncio) | pipeline/graph, atlas, config |
+| **pipeline/runner** | `src/helix_mini/pipeline/runner.py` | shared `_execute()` core; `run_project()` (fresh), `resume_project()` (from a snapshot at any node), `run_parallel()` (multi-folder via asyncio) | pipeline/graph, atlas, config |
 | **pipeline/decisions** | `src/helix_mini/pipeline/decisions.py` | `append_decision()`, `render_decisions_md()`, `save_decisions_md()` — audit log | — |
-| **pipeline/snapshots** | `src/helix_mini/pipeline/snapshots.py` | `mint_snapshot()`, `load_snapshot()`, `list_snapshots()` — state checkpoints | — |
+| **pipeline/snapshots** | `src/helix_mini/pipeline/snapshots.py` | `mint_snapshot()`, `load_snapshot()`, `list_snapshots()`, `find_snapshot()`, `snapshot_summary()`, `diff_snapshots()`, `snapshot_gitgraph()` — git-style state history | — |
 | **sandbox** | `src/helix_mini/sandbox.py` | Validates all LLM-generated file writes — Atlas pages *and* builder code artifacts (path-confined, no traversal/absolute, size/batch caps, never executed) | atlas.store.PageWrite |
 | **llm** | `src/helix_mini/llm.py` | `call_llm()`/`call_llm_json()` — single chokepoint; routes `cli/` to llm_cli, else litellm | litellm, llm_cli (lazy) |
 | **llm_cli** | `src/helix_mini/llm_cli.py` | CLI-backed engine: `CLIEngine` registry, `call_cli_llm()`, `call_cap_for()` | subprocess, config (lazy) |
 | **agent_sdk** | `src/helix_mini/agent_sdk.py` | Claude Agent SDK driver — helix ops as in-process MCP tools + permission gate | claude-agent-sdk (optional, lazy) |
 | **docker** | `src/helix_mini/docker.py` | `run_sandboxed()` — builds and runs Docker container with security hardening | subprocess, config |
 | **app** | `src/helix_mini/app.py` | `HelixMini` facade — wires Atlas + config + pipeline runner | atlas, config, pipeline/runner |
-| **cli** | `src/helix_mini/cli.py` | Click CLI: `run`, `agent`, `setup`, `init`, `status`, `log`, `atlas search` | click, app, atlas, config |
+| **cli** | `src/helix_mini/cli.py` | Click CLI: `run`, `agent`, `setup`, `init`, `status`, `log`, `atlas search`, `snapshots` group (list/show/diff/diagram/resume); shared `_resolve_model_config()` + `_engine_options` | click, app, atlas, config |
 
 ---
 
@@ -89,12 +89,20 @@ Same pipeline as Operation 1, but inference is served by spawning the CLI:
 
 ### Operation 5: `helix-mini agent [PROMPT]...`
 
-helix-mini is *driven* by a Claude agent (Claude Agent SDK):
+The whole flow is *driven* by a Claude agent (Claude Agent SDK):
 
 1. `cli.py:agent` clears the nested-session guard, then `agent_sdk.run_agent`.
-2. `build_helix_server()` registers `atlas_search`/`atlas_status`/`decision_log`/`run_pipeline` as in-process MCP tools (`mcp__helix__*`).
-3. `ClaudeAgentOptions` auto-approves the read tools; `run_pipeline` falls through to a `can_use_tool` confirmation (denied non-interactively).
-4. A `ClaudeSDKClient` loop runs the prompt (one-shot) or an interactive session; subscription auth is preferred via `claude_code_auth()`.
+2. `build_helix_server()` registers nine in-process MCP tools (`mcp__helix__*`): 3 Atlas read + 4 snapshot read (`snapshot_list`/`show`/`diff`/`timeline`) + `run_pipeline` + `resume_pipeline`.
+3. `ClaudeAgentOptions` auto-approves the 7 read tools; `run_pipeline`/`resume_pipeline` fall through to a `can_use_tool` confirmation. The gate is **fail-closed** (`run_permission_decision`): any unlisted tool — including the SDK's `Bash`/`Write`/`Edit` — is denied, and those built-ins are additionally hard-blocked via `disallowed_tools`.
+4. A `ClaudeSDKClient` loop runs the prompt (one-shot) or an interactive session; subscription auth is preferred via `claude_code_auth()`. So one session can source+run a folder, browse/diff the snapshot history, and resume the forge cycle — all conversationally.
+
+### Operation 6: `helix-mini snapshots {list,show,diff,diagram,resume}`
+
+Git-style access to a project's snapshot history:
+
+1. `cli.py` `snapshots` group resolves the project dir and loads snapshots via `pipeline.snapshots` pure helpers (`list_snapshots`/`find_snapshot`/`load_snapshot`).
+2. `list`/`show`/`diff` render `snapshot_summary()`/`diff_snapshots()`; `diagram` renders `snapshot_gitgraph()` (a standard Mermaid `gitGraph`) and writes `<project>/timeline.md` (or `--output`).
+3. `resume` loads the snapshot's full `ForgeState`, resolves the engine via the shared `_resolve_model_config()`, and calls `runner.resume_project()` — which re-enters the LangGraph at `--at` (any of the 12 `GRAPH_NODES`, default the snapshot's stage) via `build_graph(start_at=…)`. Cost/history carry forward; autonomy/caps are refreshed.
 
 ---
 
@@ -208,12 +216,14 @@ All persistent data lives under `HELIX_HOME` (default `~/.helix-mini/`, overrida
         ├── overview.md                 # Project summary page
         ├── .decisions.json             # Decision log (JSON array)
         ├── decisions.md                # Decision log (rendered markdown)
+        ├── timeline.md                 # Mermaid gitGraph (written by `snapshots diagram`)
         ├── artifacts/                  # Builder-written code/analysis files
         │   └── <relative paths>        #   (sandbox-confined; rewritten each refine pass)
         └── .snapshots/
             ├── snap-1.json             # Full ForgeState after scout
             ├── snap-2.json             # Full ForgeState after critic_methods
             └── snap-N.json             # One per major pipeline node (+ each refine loop)
+                                        #   (numbered; immutable; git-style history)
 ```
 
 ---

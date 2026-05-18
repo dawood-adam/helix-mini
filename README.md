@@ -58,14 +58,22 @@ helix-mini agent                            # interactive agent session
 helix-mini status                           # Atlas stats + projects
 helix-mini atlas search cardiac             # search the wiki
 helix-mini log my-research                  # decision log
+helix-mini snapshots list my-research       # git-style history (log)
+helix-mini snapshots diff my-research 5 7   # diff two snapshots
+helix-mini snapshots diagram my-research    # Mermaid gitGraph timeline
+helix-mini snapshots resume my-research 5 --at builder --lightspeed   # pick back up
 ```
 
-`helix-mini agent` auto-approves read-only Atlas tools; launching a pipeline
-run from the agent is human-gated (terminal confirmation).
+Snapshots work like git — `list`/`show`/`diff`/`diagram`, and `resume` any
+snapshot to re-enter the pipeline at a chosen stage (see
+[docs/guides/snapshots.md](docs/guides/snapshots.md)). `helix-mini agent`
+drives the **whole flow** conversationally (source+run, browse/diff snapshots,
+resume); read tools auto-approve, while `run_pipeline`/`resume_pipeline` are
+human-gated (terminal confirmation) behind a fail-closed permission gate.
 
 ## Develop
 
 ```bash
 pip install -e '.[dev]'
-pytest -q          # 126 passed, 1 skipped (1 opt-in live test)
+pytest -q          # 156 passed, 3 skipped
 ```

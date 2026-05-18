@@ -185,6 +185,72 @@ class TestRouting:
         assert parsed == {"verdict": "ship"}
         assert cost == pytest.approx(0.0123)
 
+    @patch("helix_mini.llm_cli.call_cli_llm")
+    def test_cli_timeout_not_clamped_by_api_default(self, mock_cli):
+        # Regression: the 120s litellm default must NOT be forced onto the CLI
+        # engine (which has its own 600s). call_llm must forward timeout=None
+        # so call_cli_llm falls back to eng.timeout.
+        from helix_mini.llm import LLMResponse, call_llm
+
+        mock_cli.return_value = LLMResponse(content="ok", usage={}, cost=0.0)
+        call_llm(model="cli/claude", system="s", user="u")
+        assert mock_cli.call_args.kwargs["timeout"] is None
+
+        call_llm(model="cli/claude", system="s", user="u", timeout=42)
+        assert mock_cli.call_args.kwargs["timeout"] == 42
+
+
+class TestJsonSalvage:
+    def test_extract_plain_object(self):
+        from helix_mini.llm import _extract_json_block
+
+        assert _extract_json_block('{"a": 1}') == '{"a": 1}'
+
+    def test_extract_from_prose(self):
+        from helix_mini.llm import _extract_json_block
+
+        block = _extract_json_block(
+            'Sure! Here is the result:\n{"verdict": "ship", "n": 2}\nHope it helps.'
+        )
+        assert json.loads(block) == {"verdict": "ship", "n": 2}
+
+    def test_braces_inside_strings_not_miscounted(self):
+        from helix_mini.llm import _extract_json_block
+
+        src = 'x {"code": "if (a) { return [1]; }", "ok": true} y'
+        assert json.loads(_extract_json_block(src)) == {
+            "code": "if (a) { return [1]; }", "ok": True
+        }
+
+    def test_no_json_returns_none(self):
+        from helix_mini.llm import _extract_json_block
+
+        assert _extract_json_block("no json here at all") is None
+
+    def test_call_llm_json_salvages_prose_wrapped(self, monkeypatch):
+        from helix_mini import llm
+        from helix_mini.llm import LLMResponse, call_llm_json
+
+        monkeypatch.setattr(
+            llm, "call_llm",
+            lambda **kw: LLMResponse(
+                content='Here is the JSON:\n{"artifacts": [], "verdict": "iterate"}\nDone.',
+                usage={}, cost=0.0),
+        )
+        parsed, _ = call_llm_json(model="cli/claude", system="s", user="u")
+        assert parsed == {"artifacts": [], "verdict": "iterate"}
+
+    def test_call_llm_json_raw_fallback_when_unsalvageable(self, monkeypatch):
+        from helix_mini import llm
+        from helix_mini.llm import LLMResponse, call_llm_json
+
+        monkeypatch.setattr(
+            llm, "call_llm",
+            lambda **kw: LLMResponse(content="totally not json", usage={}, cost=0.0),
+        )
+        parsed, _ = call_llm_json(model="x/y", system="s", user="u")
+        assert parsed == {"raw": "totally not json"}
+
 
 class TestModelConfigAndCaps:
     def test_model_config_cli(self):

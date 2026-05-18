@@ -2,10 +2,11 @@
 
 ## Goal
 
-Operate helix-mini conversationally. A Claude agent (built on the **Claude
-Agent SDK**) is given helix-mini's operations as tools, so you can ask it to
-search the Atlas, summarize a project's decisions, or kick off a pipeline run —
-in natural language.
+Operate **the whole of helix-mini** conversationally. A Claude agent (built on
+the **Claude Agent SDK**) is given helix-mini's operations as tools, so you can
+ask it — in natural language — to source a folder and run the pipeline, search
+the Atlas, browse/diff the git-style snapshot history, render the development
+timeline, and **resume the forge cycle** from a chosen stage.
 
 ## Prerequisites
 
@@ -21,6 +22,8 @@ in natural language.
 ```bash
 helix-mini agent what do we know about cardiac modeling
 helix-mini agent run the pipeline on ./new-papers and summarize the verdict
+helix-mini agent show the snapshot timeline for cardiac-sim
+helix-mini agent pick cardiac-sim back up from snap-5 and re-run from the builder
 ```
 
 ### 2. Interactive
@@ -41,29 +44,40 @@ helix-mini agent
 | `atlas_search` | auto-approved | Keyword search over the wiki |
 | `atlas_status` | auto-approved | Page count + project list |
 | `decision_log` | auto-approved | Rendered decision log for a project |
-| `run_pipeline` | **human-gated** | Expensive; prompts for terminal confirmation, denied in non-interactive sessions |
+| `snapshot_list` | auto-approved | Git-style snapshot log |
+| `snapshot_show` | auto-approved | One snapshot's key state |
+| `snapshot_diff` | auto-approved | Diff two snapshots |
+| `snapshot_timeline` | auto-approved | Mermaid `gitGraph` of development over time |
+| `run_pipeline` | **human-gated** | Expensive; terminal confirm, denied non-interactively |
+| `resume_pipeline` | **human-gated** | Resume the forge cycle from a snapshot; terminal confirm, denied non-interactively |
 
-These are exposed as in-process MCP tools (`mcp__helix__*`) — no separate
-server process.
+These nine are exposed as in-process MCP tools (`mcp__helix__*`) — no separate
+server process. The permission gate is **fail-closed**: every other tool
+(including the SDK's built-in `Bash`/`Write`/`Edit`) is denied *and*
+hard-blocked, so the agent can never escape to arbitrary commands.
 
 ## How It Works
 
 1. `helix-mini agent` clears the nested-session guard (so the SDK's bundled
    `claude` runs even inside Claude Code) and prefers subscription auth via
    `claude_code_auth()` (drops `ANTHROPIC_API_KEY` when a token is set).
-2. `build_helix_server()` registers the four tools and creates an in-process
+2. `build_helix_server()` registers all nine tools and creates an in-process
    SDK MCP server.
-3. `ClaudeAgentOptions` auto-approves the read tools via `allowed_tools`;
-   `run_pipeline` is intentionally omitted so it falls through to a
-   `can_use_tool` confirmation.
+3. `ClaudeAgentOptions` auto-approves the seven read tools via `allowed_tools`;
+   `run_pipeline`/`resume_pipeline` are intentionally omitted so they fall
+   through to a fail-closed `can_use_tool` confirmation, and the SDK built-ins
+   are listed in `disallowed_tools`.
 4. A `ClaudeSDKClient` loop runs your prompt (one-shot) or an interactive
-   session. A launched run reuses `ModelConfig.default()` (OAuth wins).
+   session. A launched run/resume reuses `ModelConfig.default()` (OAuth wins),
+   falling back to `cli/claude` so it needs no provider key.
 
 ## Variations
 
 - **No SDK installed**: the command exits with a clear
   `pip install 'helix-mini[agent]'` hint.
-- **Non-interactive** (CI, piped input): `run_pipeline` is denied automatically;
-  the read tools still work.
+- **Non-interactive** (CI, piped input): `run_pipeline`/`resume_pipeline` are
+  denied automatically; the seven read tools still work.
+- **Browse then resume**: ask for the timeline/diff first, then "resume from
+  snap-N at builder" — see [Snapshots as Git-Style Version Control](snapshots.md).
 - **Power the pipeline itself via the CLI instead**: see
   [Claude Subscription / CLI Engine](claude-cli-engine.md).

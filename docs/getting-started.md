@@ -92,13 +92,14 @@ Options:
   --help         Show this message and exit.
 
 Commands:
-  agent   Drive helix-mini conversationally via a Claude agent.
-  atlas   Atlas wiki commands.
-  init    Create a new project folder ready for research.
-  log     Print decision log for a project.
-  run     Run Forge pipeline on one or more folders.
-  setup   Interactive setup — pick provider, enter API key, validate.
-  status  Show Atlas status and recent projects.
+  agent      Drive helix-mini conversationally via a Claude agent.
+  atlas      Atlas wiki commands.
+  init       Create a new project folder ready for research.
+  log        Print decision log for a project.
+  run        Run Forge pipeline on one or more folders.
+  setup      Interactive setup — pick provider, enter API key, validate.
+  snapshots  Git-style snapshot history: list / show / diff / diagram / resume.
+  status     Show Atlas status and recent projects.
 ```
 
 ### 2. Run the test suite
@@ -109,10 +110,12 @@ pytest
 
 Expected output:
 ```
-126 passed, 1 skipped in ~3s
+156 passed, 3 skipped in ~3s
 ```
 
-(The 1 skipped is a live Claude-CLI integration test, opt-in via `HELIX_CLI_IT=1`.)
+(The 3 skipped: a live Claude-CLI integration test, opt-in via `HELIX_CLI_IT=1`,
+plus 2 SDK-absent error-path tests that can't run when `claude-agent-sdk` is
+installed.)
 
 ### 3. Create a test project
 

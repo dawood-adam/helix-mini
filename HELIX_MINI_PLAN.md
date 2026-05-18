@@ -131,9 +131,9 @@ helix-mini/
 │       │   ├── agents.py             # 6 LLM agent bodies + system prompts
 │       │   ├── router.py             # Gate decisions + sanity routing (pure rules)
 │       │   ├── graph.py              # LangGraph 12-node pipeline definition
-│       │   ├── runner.py             # run_project + run_parallel execution
+│       │   ├── runner.py             # _execute core + run_project / resume_project / run_parallel
 │       │   ├── decisions.py          # Decision log (JSON + markdown render)
-│       │   └── snapshots.py          # Lightweight state snapshots
+│       │   └── snapshots.py          # Git-style state history (list/find/summary/diff/gitGraph)
 │       │
 │       ├── sandbox.py                  # LLM output validation (paths, content, batch limits)
 │       ├── llm.py                      # Thin LLM wrapper (litellm; routes cli/ to llm_cli)
@@ -141,7 +141,7 @@ helix-mini/
 │       ├── agent_sdk.py                # Claude Agent SDK driver (helix tools as MCP)
 │       ├── docker.py                   # Docker sandbox execution
 │       ├── app.py                      # Facade: Atlas + config + runner
-│       └── cli.py                      # CLI commands (run, agent, setup, status, log, init)
+│       └── cli.py                      # CLI commands (run, agent, snapshots, setup, status, log, init)
 │
 └── tests/
     ├── conftest.py                     # Shared fixtures
@@ -149,7 +149,9 @@ helix-mini/
     ├── test_lightspeed.py              # Agent + full pipeline tests with fake LLM
     ├── test_sandbox.py                 # Output validation tests
     ├── test_setup.py                   # Config, model, provider tests
-    ├── test_workflow.py                # Router, decisions, snapshots, state tests
+    ├── test_workflow.py                # Router, decisions, mint/load snapshot, state
+    ├── test_iterate_loop.py            # Bounded builder↔critic_results refine loop
+    ├── test_snapshots.py               # Git-style helpers/diff/gitGraph, resume, CLI group
     ├── test_llm_cli.py                 # CLI engine: registry, exec, routing, caps
     ├── test_agent_sdk.py               # Agent SDK tools + permission gate (SDK-free)
     └── test_oauth_auth.py              # OAuth precedence across run/agent/engine
@@ -206,13 +208,29 @@ helix-mini/
 - Strips the nested-session guard so it runs even inside Claude Code
 
 ### 7. Agent Mode (`helix-mini agent [PROMPT]...`)
-- Drives helix-mini conversationally via the **Claude Agent SDK**
-- helix-mini ops are exposed as in-process MCP tools: `atlas_search`,
-  `atlas_status`, `decision_log` (auto-approved, read-only) and `run_pipeline`
-  (expensive — human-gated via a `can_use_tool` confirmation)
+- Drives **the whole of helix-mini** conversationally via the **Claude Agent
+  SDK** — source+run a folder, browse/diff snapshots, resume the forge cycle
+- Nine in-process MCP tools: `atlas_search`/`atlas_status`/`decision_log` +
+  `snapshot_list`/`snapshot_show`/`snapshot_diff`/`snapshot_timeline`
+  (auto-approved, read-only) and `run_pipeline`/`resume_pipeline` (expensive —
+  human-gated via a `can_use_tool` confirmation)
+- **Fail-closed** gate: any unlisted tool — incl. the SDK's `Bash`/`Write`/
+  `Edit` — is denied *and* hard-blocked via `disallowed_tools`
 - `PROMPT` is variadic — type the request unquoted (`helix-mini agent search
   the atlas for X`); no text → interactive session
 - Optional extra: `pip install 'helix-mini[agent]'`
+
+### 8. Snapshots as Git-Style Version Control + Resume
+- Every pipeline node (and each refine builder pass) mints an immutable,
+  numbered full-`ForgeState` snapshot — an append-only, git-like history
+- `helix-mini snapshots {list,show,diff,diagram}` ≈ `git log`/`show`/`diff` +
+  a standard **Mermaid `gitGraph`** of development over time
+- `helix-mini snapshots resume <proj> <N> [--at STAGE]` re-enters the LangGraph
+  at any of the 12 nodes (default the snapshot's stage), seeded with the
+  snapshot's full state — cost/history carry forward, autonomy/caps refresh.
+  Implemented by parametrizing `build_graph(start_at=…)` + a shared
+  `runner._execute()` core (no LangGraph checkpointer needed)
+- Same engine flags as `run` (one shared `_engine_options` definition)
 
 ### Auth & default resolution
 
@@ -333,15 +351,21 @@ def build_graph(agents, home, ask_fn, progress_fn) -> StateGraph
 #   under --lightspeed; HITL (prompts ship/iterate/abandon) otherwise.
 
 # pipeline/runner.py — Execution
+def _execute(*, agents, home, ..., initial_state, start_at, max_iterations)  # shared core
 def run_project(folder, atlas, model_config, ...) -> ForgeState
+def resume_project(name, atlas, mc, *, snapshot_state, start_at, ...) -> ForgeState
 async def run_parallel(folders, atlas, model_config, ...) -> list[ForgeState]
 
 # pipeline/decisions.py — Decision log
 def append_decision(path, stage, decision, rationale)
 def render_decisions_md(path) -> str
 
-# pipeline/snapshots.py — State snapshots
+# pipeline/snapshots.py — Git-style state history
 def mint_snapshot(state, project_dir) -> Path
+def list_snapshots / find_snapshot / load_snapshot(...)        # numeric order
+def snapshot_summary(snap) -> dict                              # list/show
+def diff_snapshots(a, b) -> dict[str, tuple]                    # git-style diff
+def snapshot_gitgraph(snaps) -> str                             # Mermaid gitGraph
 ```
 
 ### `sandbox.py` — LLM Output Validation
@@ -393,19 +417,25 @@ graph (`_check_caps`) — the cost cap's fallback guardrail.
 ```python
 # Pure, SDK-free, unit-tested directly:
 def atlas_search_text/atlas_status_text/decision_log_text/run_pipeline_text(...)
+def snapshot_list_text/snapshot_show_text/snapshot_diff_text(...)
+def snapshot_timeline_text(...)                              # Mermaid gitGraph
+def resume_pipeline_text(project, snapshot, at, ...)         # reuses resume_project
 def run_permission_decision(tool_name, *, interactive, approver) -> (bool, str)
 def claude_code_auth() -> (env_to_pass, env_keys_to_drop)   # OAuth for the SDK
 
 # SDK plumbing (lazy import of claude-agent-sdk):
-def build_helix_server(home)        # @tool wrappers + create_sdk_mcp_server
+def build_helix_server(home)        # 9 @tool wrappers + create_sdk_mcp_server
 def run_agent(prompt, home, turns)  # ClaudeSDKClient loop; can_use_tool gate
 ```
 
-Exposes helix-mini as in-process MCP tools (`mcp__helix__*`). Read tools are
-auto-approved via `allowed_tools`; `run_pipeline` is intentionally omitted so it
-falls through to `can_use_tool`, which prompts for terminal confirmation and
-denies in non-interactive sessions. The module imports without the SDK so the
-pure helpers stay testable; `run_pipeline` reuses `ModelConfig.default()`.
+Exposes the whole of helix-mini as nine in-process MCP tools
+(`mcp__helix__*`). The 7 read tools auto-approve via `allowed_tools`;
+`run_pipeline`/`resume_pipeline` are omitted so they fall through to
+`can_use_tool`, which prompts for terminal confirmation and denies in
+non-interactive sessions. The gate is **fail-closed** — unlisted tools
+(incl. SDK built-ins, also in `disallowed_tools`) are denied. The module
+imports without the SDK so the pure helpers stay testable; runs/resumes reuse
+`ModelConfig.default()` (falling back to `cli/claude`).
 
 ### `docker.py` — Docker Sandbox
 
@@ -420,6 +450,11 @@ def run_sandboxed(folders, lightspeed, question) -> None
 helix-mini run <folder>... [--lightspeed] [--local|--local-recommended]
                            [--cli claude [--cli-model haiku]] [--sandbox]
 helix-mini agent [PROMPT]... [--max-turns N]  # Conversational; unquoted text
+helix-mini snapshots list <project>           # git log
+helix-mini snapshots show <project> <N>       # git show
+helix-mini snapshots diff <project> <A> <B>   # git diff
+helix-mini snapshots diagram <project> [--output P]   # Mermaid gitGraph
+helix-mini snapshots resume <project> <N> [--at STAGE] [engine flags]
 helix-mini setup                    # Interactive provider + API key wizard
 helix-mini init <name>              # Create project folder with question.md
 helix-mini status                   # Show Atlas stats + recent projects
@@ -427,8 +462,10 @@ helix-mini log <project>            # Print decision log
 helix-mini atlas search <query>     # Search the wiki
 ```
 
-With no engine flag, `run` resolves via `ModelConfig.default()` (OAuth → API
-key). `agent` clears the nested-session guard, then runs subscription-first.
+With no engine flag, `run` resolves via the shared `_resolve_model_config()`
+(`ModelConfig.default()`: OAuth → API key). `snapshots resume` shares that
+resolver and the `_engine_options` flag set with `run`. `agent` clears the
+nested-session guard, then runs subscription-first.
 
 ---
 
@@ -478,10 +515,12 @@ $ helix-mini run ./cardiac-papers --lightspeed
 │           ├── plan.md                   # Validation plan
 │           ├── .decisions.json           # Structured decision log
 │           ├── decisions.md              # Rendered narrative
+│           ├── timeline.md               # Mermaid gitGraph (snapshots diagram)
 │           ├── artifacts/                # Builder-written code (sandbox-confined)
 │           │   └── src/sim.py ...        #   rewritten in place each refine pass
 │           └── .snapshots/
-│               └── snap-1.json ...       # one per node + per refine loop
+│               └── snap-1.json ...       # numbered, immutable; git-style
+│                                         #   history (one per node + refine pass)
 ├── raw/
 │   ├── cardiac-papers/                   # Immutable copies of input files
 │   │   ├── chen-2024.pdf
@@ -555,8 +594,12 @@ Four core deps. PDF support and the Agent SDK are optional extras. The
 - Nested-session guard vars are stripped so the CLI/SDK run inside Claude Code
 
 ### Agent Tool Gating (`agent_sdk.py`)
-- Read tools auto-approved; the costly `run_pipeline` requires explicit
-  terminal confirmation and is denied in non-interactive sessions
+- **Fail-closed** `run_permission_decision`: only the 7 helix read tools
+  auto-approve; `run_pipeline`/`resume_pipeline` require explicit terminal
+  confirmation and are denied in non-interactive sessions
+- Every other tool — including the SDK's `Bash`/`Write`/`Edit` — is denied by
+  the gate *and* hard-blocked via `disallowed_tools` (defense-in-depth), so a
+  prompt-injected agent cannot reach arbitrary commands
 
 ---
 

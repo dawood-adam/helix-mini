@@ -33,10 +33,16 @@ def call_llm(
     user: str,
     temperature: float = 0.3,
     max_tokens: int = 4096,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int | None = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> LLMResponse:
-    """Make a single LLM call with timeout and retry protection."""
+    """Make a single LLM call with timeout and retry protection.
+
+    ``timeout=None`` means "use the path's own default": the API default
+    (``DEFAULT_TIMEOUT``) for litellm, or the CLI engine's own (longer)
+    timeout for ``cli/`` models — CLIs cold-start and are far slower, so the
+    API default must not clamp them.
+    """
     if model.startswith("cli/"):
         from .llm_cli import call_cli_llm
 
@@ -46,7 +52,7 @@ def call_llm(
             user=user,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout,
+            timeout=timeout,  # None -> the engine's own timeout applies
         )
 
     response = litellm.completion(
@@ -57,7 +63,7 @@ def call_llm(
         ],
         temperature=temperature,
         max_tokens=max_tokens,
-        timeout=timeout,
+        timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
         num_retries=max_retries,
     )
 
@@ -69,6 +75,43 @@ def call_llm(
     cost = litellm.completion_cost(completion_response=response) or 0.0
 
     return LLMResponse(content=content, usage=usage, cost=cost)
+
+
+def _extract_json_block(text: str) -> str | None:
+    """Return the first balanced top-level {...} or [...] substring, or None.
+
+    Salvages JSON when a model (esp. an agentic CLI) wraps it in prose.
+    String contents are skipped so braces inside strings don't miscount.
+    """
+    start = next(
+        (i for i, c in enumerate(text) if c in "{["), None
+    )
+    if start is None:
+        return None
+    open_ch = text[start]
+    close_ch = "}" if open_ch == "{" else "]"
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
 def call_llm_json(
@@ -103,7 +146,14 @@ def call_llm_json(
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        log.warning("LLM returned invalid JSON, wrapping as raw content")
-        parsed = {"raw": text}
+        # Salvage JSON embedded in prose (common with agentic CLI engines)
+        block = _extract_json_block(text)
+        try:
+            parsed = json.loads(block) if block is not None else None
+        except json.JSONDecodeError:
+            parsed = None
+        if parsed is None:
+            log.warning("LLM returned invalid JSON, wrapping as raw content")
+            parsed = {"raw": text}
 
     return parsed, resp.cost

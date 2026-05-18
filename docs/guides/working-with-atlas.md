@@ -111,6 +111,11 @@ Each snapshot contains:
 - `stage` — Pipeline stage at the time
 - `state` — Full `ForgeState` as a dict (all 20 fields)
 
+Rather than reading raw JSON, use the git-style snapshot commands —
+`helix-mini snapshots list/show/diff/diagram` and `resume` to pick a project
+back up at a chosen stage. See
+[Snapshots as Git-Style Version Control](snapshots.md).
+
 ## Exploring the Atlas Conversationally
 
 Instead of `status` / `atlas search` / `log`, you can ask a Claude agent

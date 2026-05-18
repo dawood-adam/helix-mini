@@ -21,17 +21,23 @@ from .config import HELIX_HOME
 
 log = logging.getLogger(__name__)
 
-# The single costly / state-mutating tool. Read tools are auto-approved via
-# `allowed_tools`; this one falls through to the `can_use_tool` gate.
+# Read-only tools — auto-approved. State-mutating/expensive tools
+# (run_pipeline, resume_pipeline) are gated by the human via `can_use_tool`.
 RUN_TOOL = "run_pipeline"
-_READ_TOOLS = ("atlas_search", "atlas_status", "decision_log")
+_READ_TOOLS = (
+    "atlas_search", "atlas_status", "decision_log",
+    "snapshot_list", "snapshot_show", "snapshot_diff", "snapshot_timeline",
+)
+_GATED_TOOLS = ("run_pipeline", "resume_pipeline")
 
 # Exact tool names the gate recognizes. Anything else is denied (fail-closed):
 # the SDK exposes powerful built-ins (Bash/Write/Edit/...) and `allowed_tools`
 # only pre-approves — unlisted tools reach `can_use_tool`, so a prompt-injected
 # agent must not be able to slip an arbitrary tool past this gate.
 _READ_TOOL_NAMES = frozenset(_READ_TOOLS) | {f"mcp__helix__{t}" for t in _READ_TOOLS}
-_RUN_TOOL_NAMES = frozenset({RUN_TOOL, f"mcp__helix__{RUN_TOOL}"})
+_GATED_TOOL_NAMES = frozenset(_GATED_TOOLS) | {
+    f"mcp__helix__{t}" for t in _GATED_TOOLS
+}
 
 # Defense-in-depth: the agent only needs the helix MCP tools, so hard-block
 # the SDK's built-in tools at the options level too — even if the callback is
@@ -42,16 +48,23 @@ _DISALLOWED_TOOLS = (
 )
 
 SYSTEM_PROMPT = (
-    "You operate the helix-mini research system. You have tools to search the "
-    "persistent Atlas wiki, report Atlas status, read a project's decision log, "
-    "and run the multi-stage research pipeline on a folder of sources.\n\n"
+    "You operate the helix-mini research system end to end. Tools:\n"
+    "- atlas_search / atlas_status / decision_log — inspect the persistent "
+    "Atlas wiki (read-only)\n"
+    "- snapshot_list / snapshot_show / snapshot_diff / snapshot_timeline — "
+    "git-style snapshot history of a project (read-only)\n"
+    "- run_pipeline — source a folder and run the full scout→…→critic_results "
+    "pipeline on it\n"
+    "- resume_pipeline — pick a project back up from a snapshot and re-run "
+    "the forge cycle from a chosen stage\n\n"
     "Guidance:\n"
-    "- Prefer the read tools (atlas_search, atlas_status, decision_log) to "
-    "answer questions about existing knowledge.\n"
-    "- run_pipeline is expensive, slow, and writes to the Atlas wiki. Only call "
-    "it when the user explicitly asks to run/analyze a folder, and confirm the "
-    "folder path first. It is human-gated and may be denied.\n"
-    "- Cite Atlas page paths when you use their content."
+    "- Prefer the read tools to answer questions about existing knowledge or "
+    "history.\n"
+    "- run_pipeline and resume_pipeline are expensive, slow, and write to the "
+    "project. Only call them when the user explicitly asks to run/analyze a "
+    "folder or resume a project; confirm the folder/snapshot first. They are "
+    "human-gated and may be denied.\n"
+    "- Cite Atlas page paths and snapshot numbers when you use their content."
 )
 
 
@@ -141,6 +154,116 @@ def run_pipeline_text(
     return "\n".join(lines)
 
 
+def _proj_dir(project: str, home: Path | None) -> Path:
+    return _atlas_root(home) / "projects" / project
+
+
+def snapshot_list_text(project: str, home: Path | None = None) -> str:
+    """Git-style snapshot log for a project."""
+    from .pipeline.snapshots import (
+        _snap_num, list_snapshots, load_snapshot, snapshot_summary,
+    )
+
+    snaps = list_snapshots(_proj_dir(project, home))
+    if not snaps:
+        return f"No snapshots for '{project}' yet — run the pipeline first."
+    out = []
+    for p in snaps:
+        s = snapshot_summary(load_snapshot(p))
+        out.append(
+            f"snap-{_snap_num(p)}  {s['stage']}  ${s['cost']:.4f}  "
+            f"verdict={s['verdict']}  iters={s['build_iterations']}"
+        )
+    return "\n".join(out)
+
+
+def snapshot_show_text(project: str, num: int, home: Path | None = None) -> str:
+    """Key state of one snapshot."""
+    from .pipeline.snapshots import find_snapshot, load_snapshot
+
+    p = find_snapshot(_proj_dir(project, home), num)
+    if p is None:
+        return f"No snap-{num} for project '{project}'."
+    st = load_snapshot(p).get("state", {})
+    return (
+        f"snap-{num} stage={st.get('current_stage')} "
+        f"verdict={st.get('verdict') or '-'} "
+        f"iters={st.get('build_iterations', 0)} "
+        f"cost=${float(st.get('cost_so_far', 0) or 0):.4f}\n"
+        f"plan: {st.get('project_plan', {}).get('title', '-')}\n"
+        f"candidates={len(st.get('candidate_approaches') or [])} "
+        f"artifacts={len(st.get('code_artifacts') or [])} "
+        f"results={len(st.get('experiment_results') or [])}"
+    )
+
+
+def snapshot_diff_text(
+    project: str, a: int, b: int, home: Path | None = None
+) -> str:
+    """Diff two snapshots' state."""
+    from .pipeline.snapshots import diff_snapshots, find_snapshot, load_snapshot
+
+    d = _proj_dir(project, home)
+    pa, pb = find_snapshot(d, a), find_snapshot(d, b)
+    if pa is None or pb is None:
+        return f"Missing snapshot(s) for '{project}' (need snap-{a} and snap-{b})."
+    changes = diff_snapshots(load_snapshot(pa), load_snapshot(pb))
+    if not changes:
+        return f"snap-{a} -> snap-{b}: no tracked differences"
+    return f"snap-{a} -> snap-{b}:\n" + "\n".join(
+        f"  {k}: {o!r} -> {n!r}" for k, (o, n) in changes.items()
+    )
+
+
+def snapshot_timeline_text(project: str, home: Path | None = None) -> str:
+    """Mermaid gitGraph of the project's snapshot history."""
+    from .pipeline.snapshots import (
+        list_snapshots, load_snapshot, snapshot_gitgraph,
+    )
+
+    snaps = [load_snapshot(p) for p in list_snapshots(_proj_dir(project, home))]
+    return snapshot_gitgraph(snaps)
+
+
+def resume_pipeline_text(
+    project: str,
+    snapshot: int,
+    at: str = "",
+    lightspeed: bool = True,
+    home: Path | None = None,
+) -> str:
+    """Resume a project from a snapshot, re-entering at a chosen stage."""
+    from .config import ModelConfig
+    from .pipeline.snapshots import find_snapshot, load_snapshot
+
+    p = find_snapshot(_proj_dir(project, home), snapshot)
+    if p is None:
+        return f"No snap-{snapshot} for project '{project}'."
+    snap = load_snapshot(p)
+    st = snap.get("state", {})
+    start_at = at or snap.get("stage") or st.get("current_stage") or "scout"
+
+    from .pipeline.runner import resume_project
+
+    model_config = ModelConfig.default(lightspeed=lightspeed) or ModelConfig.cli(
+        "claude"
+    )
+    try:
+        r = resume_project(
+            project, Atlas(_atlas_root(home)), model_config,
+            snapshot_state=st, start_at=start_at, lightspeed=lightspeed,
+            home=home,
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+    status = "error" if r.error else "done"
+    msg = (
+        f"resumed '{project}' at '{start_at}' from snap-{snapshot}: {status} "
+        f"(stages={len(r.completed_stages)}, cost=${r.cost_so_far:.4f})"
+    )
+    return msg + (f"\n  error: {r.error}" if r.error else "")
+
+
 def run_permission_decision(
     tool_name: str,
     *,
@@ -149,15 +272,16 @@ def run_permission_decision(
 ) -> tuple[bool, str]:
     """Fail-closed gate for agent tool calls.
 
-    Only the helix read tools are auto-approved. ``run_pipeline`` requires
-    explicit approval (expensive, writes to the Atlas). **Every other tool —
-    including the SDK's built-in Bash/Write/Edit — is denied**, so a
-    prompt-injected agent cannot reach arbitrary tools even if it slips past
+    Only the helix read tools are auto-approved. The state-mutating tools
+    (``run_pipeline``, ``resume_pipeline``) require explicit approval
+    (expensive, write to the project). **Every other tool — including the
+    SDK's built-in Bash/Write/Edit — is denied**, so a prompt-injected agent
+    cannot reach arbitrary tools even if it slips past
     ``allowed_tools``/``disallowed_tools``.
     """
     if tool_name in _READ_TOOL_NAMES:
         return True, ""
-    if tool_name not in _RUN_TOOL_NAMES:
+    if tool_name not in _GATED_TOOL_NAMES:
         return False, f"Tool '{tool_name}' is not permitted by the helix agent."
     if approver is not None:
         if approver():
@@ -253,19 +377,86 @@ def build_helix_server(home: Path | None = None):
         )
         return {"content": [{"type": "text", "text": text}]}
 
+    @sdk.tool(
+        "snapshot_list",
+        "List a project's snapshots (git-style history).",
+        {"project": str},
+    )
+    async def _snap_list(args):
+        return {"content": [{"type": "text",
+                             "text": snapshot_list_text(args["project"], home)}]}
+
+    @sdk.tool(
+        "snapshot_show",
+        "Show one snapshot's key state for a project.",
+        {"project": str, "num": int},
+    )
+    async def _snap_show(args):
+        return {"content": [{"type": "text", "text": snapshot_show_text(
+            args["project"], int(args["num"]), home)}]}
+
+    @sdk.tool(
+        "snapshot_diff",
+        "Diff two snapshots (A then B) of a project.",
+        {"project": str, "a": int, "b": int},
+    )
+    async def _snap_diff(args):
+        return {"content": [{"type": "text", "text": snapshot_diff_text(
+            args["project"], int(args["a"]), int(args["b"]), home)}]}
+
+    @sdk.tool(
+        "snapshot_timeline",
+        "Mermaid gitGraph of a project's development over time.",
+        {"project": str},
+    )
+    async def _snap_timeline(args):
+        return {"content": [{"type": "text",
+                             "text": snapshot_timeline_text(args["project"], home)}]}
+
+    @sdk.tool(
+        "resume_pipeline",
+        "Pick a project back up from a snapshot and re-run the forge cycle "
+        "from a chosen stage (default: the snapshot's stage). Expensive and "
+        "writes to the project — human-gated.",
+        {"project": str, "snapshot": int, "at": str},
+    )
+    async def _resume_pipeline(args):
+        import anyio
+
+        text = await anyio.to_thread.run_sync(
+            resume_pipeline_text,
+            args["project"],
+            int(args["snapshot"]),
+            args.get("at", ""),
+            True,
+            home,
+        )
+        return {"content": [{"type": "text", "text": text}]}
+
     return sdk.create_sdk_mcp_server(
         name="helix",
         version=__version__,
-        tools=[_atlas_search, _atlas_status, _decision_log, _run_pipeline],
+        tools=[
+            _atlas_search, _atlas_status, _decision_log, _run_pipeline,
+            _snap_list, _snap_show, _snap_diff, _snap_timeline,
+            _resume_pipeline,
+        ],
     )
 
 
 def _confirm_run(tool_input: dict) -> bool:
-    """Blocking terminal confirmation for a pipeline run."""
-    folder = tool_input.get("folder", "?")
+    """Blocking terminal confirmation for a gated pipeline action."""
+    if "folder" in tool_input:
+        target = f"run pipeline on folder: {tool_input.get('folder', '?')}"
+    else:
+        target = (
+            f"resume project '{tool_input.get('project', '?')}' "
+            f"from snap-{tool_input.get('snapshot', '?')}"
+            + (f" at '{tool_input['at']}'" if tool_input.get("at") else "")
+        )
     sys.stderr.write(
-        f"\n[helix] The agent wants to RUN the pipeline on: {folder}\n"
-        f"        This is expensive and writes to the Atlas wiki.\n"
+        f"\n[helix] The agent wants to {target}\n"
+        f"        This is expensive and writes to the project.\n"
         f"        Approve? [y/N] "
     )
     sys.stderr.flush()
