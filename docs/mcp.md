@@ -1,0 +1,106 @@
+# The MCP surface
+
+Helix is an MCP server (`helix/mcp/server.py`, built on FastMCP). The client
+launches it over stdio via the project's `.mcp.json`. There is no network
+service and no credential configuration.
+
+## Connection
+
+`helix init` writes:
+
+```json
+{ "mcpServers": { "helix": { "command": "helix-mcp" } } }
+```
+
+`helix-mcp` is the console entry point (`helix.mcp.server:main`). `helix mcp`
+runs the same server in the foreground for debugging.
+
+## Sampling and elicitation
+
+The server calls back into the client for two things, both through the
+single seam in `helix/io.py`:
+
+- **Sampling** — every model completion. The client runs the model on its
+  own quota; Helix stores no keys. A client without sampling cannot run the
+  pipeline.
+- **Elicitation** — structured questions to the user mid-tool: the `hx_start`
+  wizard, every HITL gate, and confirmation before promoting a page to a
+  published tier. Schemas are flat (string / enum / boolean / array), built
+  by the `ask_*` helpers.
+
+## Tools
+
+Twenty-four tools. Read tools are side-effect-free; the rest change project
+state and the client confirms them before running.
+
+### Pipeline
+
+| Tool | Purpose |
+|---|---|
+| `hx_start` | Guided setup wizard, then start a run. |
+| `run_pipeline` | Run on a folder. `autonomy_until`: `''`, a stage, or `END`. |
+| `resume_pipeline` | Rebuild a snapshot and re-enter at any stage/branch. |
+| `hx_run_status` | The latest run's status (survives a restart). |
+| `hx_run_events` | The run's transition events since a sequence number. |
+| `hx_run_plan_set` | Steer the live run's Plan (effective at the next gate). |
+
+### Atlas
+
+| Tool | Purpose |
+|---|---|
+| `hx_atlas_ingest` | Process `atlas/inbox/` (idempotent, sha256 manifest). |
+| `hx_atlas_recall` | Auto-routing search; returns references only. |
+| `hx_atlas_get` | Fetch one page body (capped). |
+| `hx_atlas_neighbors` | k-hop neighbours over the link graph. |
+| `hx_atlas_lint` | Six-kind hygiene report with fixes. |
+| `hx_atlas_put` | Create/update a page (merges on the same path). |
+| `hx_atlas_save` | File a synthesis/comparison answer as a page. |
+| `hx_atlas_promote` | Bump tier; confirms at canonical/published. |
+| `atlas_status` | Page count and known projects. |
+| `decision_log` | A project's stage-by-stage decision log. |
+
+### Snapshots
+
+| Tool | Purpose |
+|---|---|
+| `snapshot_list` / `snapshot_show` / `snapshot_diff` | Inspect history. |
+| `snapshot_timeline` | Mermaid `gitGraph` of the DAG. |
+| `snapshot_revert` | Restore a snapshot's artifacts to disk. |
+| `hx_snap_branch` | Name a branch ref at a snapshot. |
+| `hx_snap_freeze` | Tag a snapshot immutable for publication. |
+| `hx_snap_fork` | Export the full history as a portable bundle. |
+
+`recall` deliberately returns references (id, title, tier, ~120-char
+summary, score), never bodies; `hx_atlas_get` is the separate fetch. This
+split keeps a search from flooding the model's context.
+
+## Resources
+
+Read-only, addressed by URI:
+
+| Template | Contents |
+|---|---|
+| `atlas://{path}` | A page, with its frontmatter, by repo-relative path. |
+| `snapshot://{project}/{snap_id}` | A snapshot's metadata as JSON. |
+| `hot://{project}` | The project's hot-cache working state. |
+
+## Prompts
+
+Canonical workflows the user invokes by name:
+
+| Prompt | Walks through |
+|---|---|
+| `helix_ingest` | Dropping files and ingesting the inbox. |
+| `helix_run` | Starting a run and the four control modes. |
+| `helix_lint` | An Atlas hygiene sweep and acting on each issue. |
+| `helix_freeze` | The freeze-and-fork publication checklist. |
+| `helix_resume` | Recovering context with the hot cache and history. |
+
+## Safety posture
+
+The tool set is curated and fixed — there is no general code-execution tool.
+State-changing tools are confirmed by the client (the host's consent model)
+before they run; promotion to a published tier additionally elicits an
+explicit confirmation. All model-generated page and artifact content passes
+the sandbox (`sanitize_atlas_writes`, `sanitize_code_artifacts`) before it
+reaches disk.

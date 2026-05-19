@@ -1,67 +1,66 @@
-# Snapshots
+# Snapshots — version control
 
-## The idea
+A snapshot is a saved point in a run: the full pipeline state at one
+transition, stamped with the stage, time, parent, and branch. Helix mints
+one after every stage and every send-back. The history is a real DAG —
+inspectable, diffable, branchable, and resumable from any point.
 
-A snapshot is a saved point in a run: the full pipeline state at one stage,
-stamped with the stage name and time. Helix takes one after every stage and
-every send-back, automatically. Think of it as git for the pipeline: a
-branchable history you can inspect, diff, and resume from any point.
+## Zero cost
 
-## Why it is free
+A snapshot calls no model. It serializes state and stores the stage's
+Decision Card as the human-readable digest — content the stage already
+produced. Artifact bytes are content-addressed under
+`.helix/snapshots/<project>/objects/<sha256>` and referenced by hash;
+identical files across iterations are stored once and the state record never
+inlines bytes. A snapshot stays a few kilobytes after hundreds of cycles,
+which is why per-stage snapshots are affordable and cycling has no fixed cap.
 
-A snapshot costs no LLM calls. It reuses the decision text the stage already
-wrote for the gate as its human-readable summary, so nothing is generated on
-the fly.
+## Storage
 
-Generated artifacts are content-addressed. Each file's bytes are stored once
-under `.helix/snapshots/<project>/objects/<sha256>` and referenced by hash.
-Identical files across iterations are stored once, and the state record never
-inlines artifact bytes. A snapshot stays a few kilobytes even after hundreds
-of refine cycles. That is why per-stage snapshots are affordable and why
-cycling has no fixed cap.
+```
+.helix/snapshots/<project>/
+├── <id>.json        one snapshot (state + Decision Card + manifest)
+├── index.json       the ordered DAG (id, parent, branch, stage, ts)
+├── refs.json        {tags: {...}, branches: {...}}
+└── objects/<sha>    content-addressed artifact bytes
+```
 
-## Commands
+## Inspecting
 
-Each snapshot records its `id`, `parent`, and `branch`, so the history is a
-real DAG rather than a flat list.
-
-| git | Helix |
+| Tool | Shows |
 |---|---|
-| `git log` | `helix snapshots list <project>` |
-| `git show` | `helix snapshots show <project> <id>` |
-| `git diff A B` | `helix snapshots diff <project> <a> <b>` |
-| graph view | `helix snapshots diagram <project>` (writes a Mermaid `gitGraph`) |
-| `git checkout -- .` | `helix snapshots revert <project> <id>` |
-| `git checkout <ref>` then continue | `helix snapshots resume <project> <id> [--at STAGE] [--branch NAME]` |
+| `snapshot_list` | The DAG, git-log style. |
+| `snapshot_show` | One snapshot's key state. |
+| `snapshot_diff` | Tracked differences between two snapshots. |
+| `snapshot_timeline` | A Mermaid `gitGraph` of the history. |
 
-## Resume
+## Branch, freeze, fork
 
-`resume` rebuilds the snapshot's full state, including artifact bytes from the
-object store, and re-enters the pipeline. By default it re-enters at the
-snapshot's own stage; `--at STAGE` picks any stage. `--branch NAME` continues
-on a new branch whose parent is that snapshot, so an experiment never
-overwrites the main line. `resume` accepts the same engine and autonomy flags
-as `run`.
+| Tool | Effect |
+|---|---|
+| `hx_snap_branch` | Name a branch ref at a snapshot. |
+| `hx_snap_freeze` | Tag a snapshot immutable for publication. |
+| `hx_snap_fork` | Export the full history (snaps + objects + index + refs) as `forks/<name>.tar.gz` — a self-contained, reproducible bundle. |
 
-```bash
-helix snapshots resume cardiac 7                          # from snap-7's stage
-helix snapshots resume cardiac 5 --at planner --branch replan --auto
-```
+A branch ref names a point; continuation happens by resuming with that
+branch name, which keeps an experiment off the main line.
 
-## Revert
+## Resume and revert
 
-`revert` is the file-level checkout. It writes a snapshot's artifacts back
-into the project's `artifacts/` directory and runs nothing.
+- `resume_pipeline(project, snapshot, at=, branch=)` rebuilds the snapshot's
+  full state, including artifact bytes from the object store, and re-enters
+  the pipeline. By default it re-enters at the snapshot's own stage; `at`
+  picks any stage; `branch` continues on a new branch parented at that
+  snapshot.
+- `snapshot_revert` is the file-level checkout: it writes a snapshot's
+  artifacts back to disk and runs nothing.
 
-```bash
-helix snapshots revert cardiac 5
-```
+There is no separate `checkout`. `resume_pipeline` (branched continuation)
+and `snapshot_revert` (restore a tree) cover it without a redundant
+destructive operation.
 
-## Inspecting raw files
+## Pausing
 
-Snapshots are plain JSON under `.helix/snapshots/<project>/`:
-
-```bash
-python -m json.tool < .helix/snapshots/cardiac/7.json   # state.code_artifacts is []
-ls .helix/snapshots/cardiac/objects/                     # artifact bytes by hash
-```
+A run that hits the token/call ceiling, or whose gate prompt is declined,
+records a resumable snapshot and stops rather than failing. `hx_run_status`
+reports where it stopped; `resume_pipeline` continues it.

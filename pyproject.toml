@@ -7,18 +7,18 @@ dependencies = [
     "click>=8.0",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "mcp>=1.2",
+    "anyio>=4.0",
 ]
 
 [project.optional-dependencies]
-# SDK / library mode: the LangGraph orchestrator and the litellm API path.
-# CLI-driven mode (the default) needs none of this.
-sdk = ["langgraph>=0.2.45", "litellm>=1.0"]
 pdf = ["pymupdf>=1.24"]
-agent = ["claude-agent-sdk>=0.2,<0.3"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pyyaml>=6.0"]
+embed = ["fastembed>=0.3"]
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
 
 [project.scripts]
 helix = "helix.cli:cli"
+helix-mcp = "helix.mcp.server:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

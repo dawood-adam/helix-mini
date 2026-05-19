@@ -1,3 +1,2 @@
-"""Two runners over the same core: the plain ``loop`` (default, no heavy deps)
-and ``langgraph_runner`` (the ``helix[sdk]`` extra). Both call
-``core.transitions.next_stage`` so they cannot diverge on routing."""
+"""One runner over the core: the plain ``loop``. It routes through
+``core.transitions.next_stage`` — the single place pipeline routing lives."""

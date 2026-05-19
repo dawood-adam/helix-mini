@@ -17,18 +17,21 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import tarfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
-from ..sandbox import SandboxError, validate_artifact_name
+from ..sandbox import SandboxError, validate_artifact_name, validate_project_name
+from .decisions import DecisionCard
 from .state import PipelineState, to_state
 
 log = logging.getLogger(__name__)
 
 
 def _root(project: str) -> Path:
+    project = validate_project_name(project)
     d = config.helix_dir() / "snapshots" / project
     (d / "objects").mkdir(parents=True, exist_ok=True)
     return d
@@ -62,10 +65,14 @@ def mint_snapshot(
     *,
     stage: str,
     report: dict | None = None,
+    card: DecisionCard | None = None,
     parent: str | None = None,
     branch: str = "main",
 ) -> dict:
-    """Append an immutable snapshot. Returns its metadata. No LLM call."""
+    """Append an immutable snapshot. Returns its metadata. No LLM call.
+
+    ``card`` is the stage's Decision Card (already produced by the agent —
+    serialized here, never minted), available to Loom / the linter later."""
     index = _read_index(project)
     next_id = str(max((int(m["id"]) for m in index), default=0) + 1)
 
@@ -89,6 +96,7 @@ def mint_snapshot(
         "stage": stage,
         "ts": datetime.now(timezone.utc).isoformat(),
         "report": report or {},
+        "decision_card": asdict(card) if card else None,
         "artifact_manifest": manifest,
         "state": slim,
     }
@@ -158,7 +166,7 @@ def snapshot_summary(snap: dict) -> dict:
         "branch": snap.get("branch", "main"),
         "stage": snap.get("stage") or st.get("current_stage", "?"),
         "ts": snap.get("ts", "?"),
-        "cost": float(st.get("cost_so_far", 0.0) or 0.0),
+        "tokens": int(st.get("tokens_used", 0) or 0),
         "iterations": st.get("build_iterations", 0),
         "verdict": st.get("verdict", "") or "-",
         "artifacts": len(snap.get("artifact_manifest", []) or []),
@@ -167,7 +175,7 @@ def snapshot_summary(snap: dict) -> dict:
 
 
 _DIFF_FIELDS = (
-    "current_stage", "verdict", "build_iterations", "cost_so_far",
+    "current_stage", "verdict", "build_iterations", "tokens_used",
     "chosen_approach_id", "next_action", "error",
 )
 _DIFF_LIST_FIELDS = (
@@ -217,3 +225,68 @@ def snapshot_gitgraph(project: str) -> str:
         lines.append(f'  commit id: "snap-{label}"')
     lines.append("```")
     return "\n".join(lines)
+
+
+# --- Git-shaped refs: branch / freeze (tag) / fork (bundle) -----------------
+#
+# checkout is intentionally NOT a separate op — resume_pipeline (branched
+# continuation) + snapshot_revert (restore a tree) already cover it without a
+# redundant destructive surface.
+
+
+def _refs_path(project: str) -> Path:
+    return _root(project) / "refs.json"
+
+
+def _read_refs(project: str) -> dict:
+    p = _refs_path(project)
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except (OSError, ValueError):
+            pass
+    return {"tags": {}, "branches": {}}
+
+
+def _snap_exists(project: str, snap_id: str | int) -> bool:
+    return (_root(project) / f"{snap_id}.json").exists()
+
+
+def make_branch(project: str, snap_id: str | int, name: str) -> bool:
+    """Record a named branch ref at a snapshot. (Continuation still happens
+    via ``resume_pipeline(..., branch=name)``; this just names the point.)"""
+    if not _snap_exists(project, snap_id):
+        return False
+    refs = _read_refs(project)
+    refs.setdefault("branches", {})[name] = str(snap_id)
+    _refs_path(project).write_text(json.dumps(refs, indent=2))
+    return True
+
+
+def freeze(project: str, snap_id: str | int, tag: str) -> bool:
+    """Tag a snapshot immutable for publication."""
+    if not _snap_exists(project, snap_id):
+        return False
+    refs = _read_refs(project)
+    refs.setdefault("tags", {})[tag] = str(snap_id)
+    _refs_path(project).write_text(json.dumps(refs, indent=2))
+    return True
+
+
+def list_refs(project: str) -> dict:
+    return _read_refs(project)
+
+
+def fork(project: str, name: str) -> Path:
+    """Export the project's full snapshot history (snaps + content-addressed
+    objects + index + refs) as a portable, reproducible bundle."""
+    name = validate_project_name(name)
+    root = _root(project)  # validates project; raises before any tar work
+    forks = config.project_root() / "forks"
+    forks.mkdir(parents=True, exist_ok=True)
+    dest = forks / f"{name}.tar.gz"
+    if not dest.resolve().is_relative_to(forks.resolve()):
+        raise SandboxError(f"Fork bundle escapes forks/: {name!r}")
+    with tarfile.open(dest, "w:gz") as tar:
+        tar.add(root, arcname=validate_project_name(project))
+    return dest

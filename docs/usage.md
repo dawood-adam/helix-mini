@@ -1,5 +1,7 @@
 # Using Helix
 
+Helix is driven through an MCP client. This guide uses Claude Code.
+
 ## Create a project
 
 ```bash
@@ -7,174 +9,98 @@ helix init my-research
 cd my-research
 ```
 
-This writes three files:
+This writes:
 
-- `question.md` — your research question. Edit it.
-- `helix.toml` — the only configuration. Defaults are repo-local: the Atlas
-  is `./atlas`, snapshots are `./.helix/snapshots`.
-- `CLAUDE.md` — the instructions Claude Code reads when you say "start helix".
+- `question.md` — the research question. Edit it.
+- `helix.toml` — configuration: the Atlas path and the run limits.
+- `CLAUDE.md` — instructions the client reads when you say "start helix".
+- `.mcp.json` — registers the `helix-mcp` server for this project.
 
-Add your source files (PDF, markdown, code, data) to the folder.
+Add source material anywhere under the project, or drop it into
+`atlas/inbox/` for managed ingestion. Open the folder in Claude Code; it
+starts `helix-mcp` automatically.
 
-## Drive it from Claude Code (recommended)
+## Driving a run
 
-Open Claude Code in the project and work in plain language:
+Work in plain language. The client calls Helix's tools.
 
-```bash
-claude
-```
-
-```
+```text
 you>   start helix
-helix> 6 files here (3 PDF, 2 .md, 1 .csv). Use all of them, or a subset?
-you>   all of them; question.md is correct
-helix> Scout proposed 2 approaches; I recommend #1. Proceed / send back / stop?
-you>   proceed
-helix> Methods Critic: the eval corpus is too narrow to support approach #1.
-       Proceed, or send back?
-you>   send it back to Scout, restrict to the 2024 papers
-helix> Re-ran Scout with that note; Planner produced a 4-step plan. Proceed?
-you>   run autonomously until the validator, then check with me
-helix> ... (runs the gates automatically, stops at the Validator)
+helix> What should we call this project?
+you>   smartphone-bp
+helix> One-sentence research question?
+you>   Cuffless BP from smartphone rPPG
+helix> How should it run?
+       1 step-by-step   2 auto up to a stage   3 fully autonomous
+you>   1
+helix> Source folder?
+you>   ./papers
+helix> Scout finished. Decision: 2 candidate approaches; recommends #1.
+       Proceed, send back, or stop?
+you>   send back to scout — restrict to 2024 papers only
+helix> Re-ran Scout with that directive. Planner is done. Proceed?
+you>   run autonomously until the validator
+helix> ...
 ```
 
-The scaffolded `CLAUDE.md` makes Claude Code: ask which sources to use and
-confirm the question before running anything; run the pipeline and stop at
-every stage with a short report; carry out your decision (proceed, send back
-to any earlier stage with feedback, or stop); honor "run autonomously until
-<stage>"; and use the snapshot and Atlas commands when you ask.
+`hx_start` runs that setup conversation through MCP elicitation and starts
+the pipeline. `run_pipeline(folder, autonomy_until)` is the same run without
+the wizard.
 
-Helix's interface is tool-agnostic — it is a CLI plus a terminal review
-prompt, usable by any human or agent. The conversational, zero-setup path is
-optimized for Claude Code, which reads `CLAUDE.md` automatically. Another
-agentic CLI (Cursor, Aider, a Codex/Gemini CLI, your own) can drive Helix the
-same way if you point it at the project's `CLAUDE.md` instructions through
-whatever rules mechanism that tool uses.
+## Control modes
 
-## What actually runs the agents
+The control mode becomes a `Plan` that governs every gate:
 
-It is worth being precise, because two different Claude roles are involved:
-
-- The Claude Code session you type into is the **conductor**. It reads
-  `CLAUDE.md`, runs the `helix run` command, and relays gate reports to you.
-  It does not run Scout, Planner, and the rest itself.
-- `helix run` powers each LLM stage by spawning its **own headless `claude`
-  subprocess per stage** (the `cli/claude` engine), authenticated by your
-  subscription token. No API key is involved.
-
-So Claude Code calling the backend *and* Claude powering the agents are both
-true — but it is a different Claude: the conductor invokes `helix run`, and
-`helix run` spawns a fresh model process for each of the five LLM stages. What
-runs the stages is decided by engine resolution:
-
-| You have | Stages run on |
+| Mode | Behaviour |
 |---|---|
-| a Claude subscription token (OAuth) | `claude` CLI subprocesses — no API key |
-| an API key only | the Anthropic/OpenAI API via litellm (`helix[sdk]`) |
-| `--local` | Ollama + Qwen, fully offline |
+| step-by-step | Pause and ask at every transition (default). |
+| auto up to a stage | Auto-proceed until that stage, then ask. |
+| fully autonomous | Never ask; deterministic routing only. |
 
-OAuth wins: a subscription token always beats a stray `ANTHROPIC_API_KEY`, so
-you are never billed for the API by accident.
-
-## Run it directly
-
-The chat layer is optional. `helix run` is the same pipeline without it, and
-is exactly what the conductor calls:
-
-```bash
-helix run .
-```
-
-It pauses after each stage and prints a report:
-
-```
-── gate after planner ──
-  decision : Plan: CFD cardiac model
-  rationale: Designed validation plan with success criteria
-[p]roceed / [g]o back to a stage / [s]top:
-```
-
-`p` proceeds; `g` sends the run back to any stage with feedback (no iteration
-cap); `s` stops.
+At a paused gate you may **proceed**, **send the run back** to any earlier
+stage with a directive (threaded into that stage when it re-runs), or
+**stop**. Declining a gate prompt pauses the run; it is resumable from the
+last snapshot. You can change the plan mid-run with `hx_run_plan_set`.
 
 ## A run, end to end
 
-One project, showing how the pipeline, the Atlas, and snapshots fit together:
+1. **Scout** reads the Atlas and the sources, proposes approaches, and
+   writes source pages.
+2. **Methods Critic** evaluates and recommends an approach.
+3. **Planner** writes a validation plan with numeric bands.
+4. **Builder** writes code artifacts and reports metrics.
+5. **Validator** (deterministic, no model) checks metrics against the bands;
+   a hard miss routes back to the Builder with the flags as feedback.
+6. **Results Critic** judges the outcome and returns a verdict.
 
-1. **Scout** ingests the folder, reads the Atlas index (anything earlier
-   projects learned is already available), proposes approaches, and writes a
-   source page per file to the Atlas.
-2. **Methods Critic** picks an approach; **Planner** writes a plan with
-   numeric bands and a plan page; **Builder** writes code artifacts and
-   reports metrics.
-3. **Validator** checks those metrics against the plan's bands. A `HARD:`
-   miss loops back to the Builder with the flags as feedback.
-4. **Results Critic** judges the outcome, writes the project overview page,
-   and returns a verdict.
-5. A snapshot is minted after **every** stage and **every** send-back, so the
-   whole run is a git-style history you can diff, branch, and resume.
-6. The next project's Scout reads the same Atlas, so concepts and entities
-   compound across projects instead of starting from scratch.
+Every stage emits a Decision Card and a snapshot. Every send-back is
+snapshotted too, so the whole run is a branchable history. The next
+project's Scout reads the same Atlas, so knowledge compounds.
 
-The result: validated artifacts, a full decision log, a branchable snapshot
-history, and a wiki that is richer than before the run. See
-[pipeline.md](pipeline.md) for what each stage does in detail and
-[snapshots.md](snapshots.md) for the snapshot model.
+## Observing and resuming
 
-## Autonomy
+- `hx_run_status` / `hx_run_events` — the latest run's state and transition
+  trail (persisted; survives a server restart).
+- `snapshot_list` / `snapshot_show` / `snapshot_diff` / `snapshot_timeline`
+  — the history.
+- `resume_pipeline(project, snapshot, at=, branch=)` — rebuild a snapshot's
+  state and re-enter at any stage; a new branch keeps an experiment off the
+  main line.
+- `snapshot_revert` — write a snapshot's artifacts back to disk without
+  running anything.
+- The `hot://<project>` resource is a one-page working-state cache,
+  regenerated at run end. Read it first when resuming.
 
-```bash
-helix run . --autonomous-until builder   # auto until builder, then ask
-helix run . --auto                       # never ask
-```
+## Limits
 
-Autonomy is chosen per run. A resume can use a different setting, and from
-Claude Code you can switch mid-run by saying so.
+`helix.toml [limits]` sets `token_cap` and `call_cap`. The token figure is a
+server-side estimate (sampling does not report usage). Reaching a cap pauses
+the run and records a resumable snapshot; interactively, you are offered the
+choice to raise the ceiling instead.
 
-## Engines
+## Component guides
 
-```bash
-helix run .                                   # auto: OAuth, else API key
-helix run . --cli claude                      # force the Claude CLI, no API key
-helix run . --lightspeed                      # cheapest model, auto gates
-helix run . --local --model-size medium       # offline, Ollama + Qwen
-helix run . --local-recommended               # simple stages local, hard ones cloud
-helix run . --engine sdk                      # same pipeline, LangGraph runner
-```
-
-Credentials live in `.helix/.env`, or run `helix setup` for a guided API-key
-setup. The API path and `--engine sdk` need `helix[sdk]`.
-
-## The Claude agent
-
-`helix agent` is a separate, scriptable entry point, distinct from driving
-Helix conversationally inside Claude Code:
-
-```bash
-helix agent show the timeline for my-research and resume it from snap-5
-helix agent                                   # interactive session
-```
-
-Read tools (Atlas, decision log, snapshots) are auto-approved. `run_pipeline`,
-`resume_pipeline`, and `snapshot_revert` require confirmation. The gate is
-fail-closed: every other tool, including the SDK's Bash, Write, and Edit, is
-denied. Needs `helix[agent]`.
-
-## The cost ceiling
-
-`helix.toml` sets `cost_cap` and `call_cap` under `[limits]`. When a run
-reaches the ceiling it does not crash or lose work:
-
-- interactive: you are asked to continue (which doubles the ceiling) or stop.
-- autonomous: it takes a snapshot, stops, and prints the resume command.
-
-## Snapshots and resume
-
-Every stage and every send-back is snapshotted. See
-[snapshots.md](snapshots.md). Common commands:
-
-```bash
-helix snapshots list my-research
-helix snapshots resume my-research 5 --at planner --branch retry --auto
-helix snapshots revert my-research 5      # restore that snapshot's files
-```
+- [forge.md](forge.md) — the pipeline and its agents
+- [atlas.md](atlas.md) — the wiki, ingest, recall, lint
+- [snapshots.md](snapshots.md) — the version-control model
+- [mcp.md](mcp.md) — the full tool, resource, and prompt surface

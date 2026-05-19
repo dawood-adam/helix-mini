@@ -1,8 +1,9 @@
 """LLM call chokepoint. Every model call funnels through here.
 
-``cli/<engine>`` models route to ``llm_cli`` (a subprocess — no Python dep).
-Everything else uses ``litellm``, imported lazily so the core/CLI path works
-without the ``helix[sdk]`` extra installed.
+Sampling-only: the model is driven by the MCP client (it picks the model,
+holds the credentials, and pays). ``call_llm`` is wired to MCP
+``sampling/createMessage`` in Phase 1. Until then it raises a clear error;
+tests patch ``helix.core.agents.call_llm_json`` so they never reach it.
 """
 
 from __future__ import annotations
@@ -13,9 +14,6 @@ from dataclasses import dataclass
 from typing import Any
 
 log = logging.getLogger(__name__)
-
-DEFAULT_TIMEOUT = 120
-DEFAULT_MAX_RETRIES = 3
 
 
 @dataclass
@@ -32,45 +30,13 @@ def call_llm(
     user: str,
     temperature: float = 0.3,
     max_tokens: int = 4096,
-    timeout: int | None = None,
-    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> LLMResponse:
-    if model.startswith("cli/"):
-        from .llm_cli import call_cli_llm
+    """Sampling-only: delegate to whatever client IO is bound for this run
+    (the MCP client's model under sampling). Raises a clear error if nothing
+    is bound. Tests patch ``helix.core.agents.call_llm_json`` above this."""
+    from .io import current
 
-        return call_cli_llm(
-            model=model, system=system, user=user,
-            temperature=temperature, max_tokens=max_tokens, timeout=timeout,
-        )
-
-    try:
-        import litellm
-    except ImportError as e:
-        raise RuntimeError(
-            f"Model '{model}' needs the litellm API path. Install it with "
-            "'pip install helix[sdk]', or use a Claude subscription "
-            "(claude setup-token) / --cli claude / --local."
-        ) from e
-
-    litellm.suppress_debug_info = True
-    response = litellm.completion(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
-        num_retries=max_retries,
-    )
-    content = response.choices[0].message.content or ""
-    usage = {
-        "prompt_tokens": response.usage.prompt_tokens,
-        "completion_tokens": response.usage.completion_tokens,
-    }
-    cost = litellm.completion_cost(completion_response=response) or 0.0
-    return LLMResponse(content=content, usage=usage, cost=cost)
+    return current().sample(system=system, user=user, max_tokens=max_tokens)
 
 
 def _extract_json_block(text: str) -> str | None:
@@ -110,8 +76,12 @@ def call_llm_json(
     user: str,
     temperature: float = 0.2,
     max_tokens: int = 4096,
-) -> tuple[dict[str, Any], float]:
-    """LLM call expecting JSON. Returns ``(parsed_dict, cost)``."""
+) -> tuple[dict[str, Any], int]:
+    """LLM call expecting JSON. Returns ``(parsed_dict, tokens)``.
+
+    Sampling never reports usage to the server, so ``tokens`` is an estimate
+    (≈ chars/4) of the prompt + response the server itself handled — enough
+    to bound a run."""
     resp = call_llm(
         model=model,
         system=system + "\n\nYou MUST respond with valid JSON only. No "
@@ -136,4 +106,7 @@ def call_llm_json(
         if parsed is None:
             log.warning("LLM returned invalid JSON, wrapping as raw content")
             parsed = {"raw": text}
-    return parsed, resp.cost
+    tokens = resp.usage.get("total_tokens") or resp.usage.get("total") or (
+        (len(system) + len(user) + len(resp.content)) // 4
+    )
+    return parsed, int(tokens)

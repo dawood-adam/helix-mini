@@ -20,5 +20,16 @@ Respond with JSON:
   ],
   "atlas_writes": [
     {"path": "sources/filename.md", "title": "...", "content": "...", "summary": "one-line"}
-  ]
+  ],
+  "decision_card": {
+    "summary": "2-3 sentences: what you did and the key decision",
+    "key_findings": ["..."],
+    "assumptions": ["..."],
+    "open_questions": ["..."],
+    "directive_for_next": "what the next stage should focus on",
+    "confidence": "low|medium|high"
+  }
 }
+
+Always include `decision_card`: its `summary` is read aloud to the user and
+stored in the snapshot; `directive_for_next` steers the next stage.

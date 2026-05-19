@@ -5,54 +5,73 @@ Guidance for Claude Code working in this repository.
 ## Commands
 
 ```bash
-pip install -e .                 # CLI mode (dependency-light: click, dotenv, pyyaml)
-pip install -e '.[sdk,dev]'      # + LangGraph/litellm + pytest
-pytest -q                        # 17 tests (incl. dual-orchestrator conformance)
-PYTHONPATH="$PWD/src" pytest -q  # in a git worktree (editable install points at main src)
-helix --help                     # CLI entry point
+pip install -e .                 # core: click, python-dotenv, pyyaml, mcp, anyio
+pip install -e '.[dev]'          # + pytest
+pip install -e '.[embed,pdf]'    # optional: fastembed (semantic recall), pymupdf
+pytest -q
+PYTHONPATH="$PWD/src" pytest -q  # in a git worktree (editable install -> main src)
+helix --help                     # init + mcp launcher only
 ```
 
-Python >=3.11. No linter configured.
+Python ≥ 3.11. No linter configured.
 
 ## Architecture
 
-One dependency-light pipeline **core**, two **orchestrators** over it, two
-ways to **drive** it. See [docs/architecture.md](docs/architecture.md).
+A dependency-light pipeline **core**, one **orchestrator** (the loop), and
+one **drive surface** (the MCP server). See
+[docs/architecture.md](docs/architecture.md).
 
-- **`helix/core/`** — imports with neither langgraph nor litellm.
-  `state.py` (`PipelineState` + `human_feedback`), `agents.py` (markdown agent
-  loader + table-driven context/mapping + deterministic registry),
-  `stages.py`, `gates.py` (HITL + `autonomy_until`), `transitions.py` (the
-  single `next_stage` resolver), `snapshots.py` (content-addressed DAG),
-  `atlas.py`/`ingest.py`, `decisions.py`.
-- **`helix/orchestrator/`** — `loop.py` (default; owns `advance`, the shared
-  per-step unit) and `langgraph_runner.py` (`helix[sdk]`; lazy langgraph).
-  Both call `loop.advance` → `transitions.next_stage`, so they cannot diverge.
-- **`helix/`** — `config.py` (all path/auth/model resolution; repo-local
-  defaults), `llm.py` (chokepoint; litellm lazy), `llm_cli.py`, `sandbox.py`,
-  `app.py` (facade), `cli.py`, `agent_iface.py` (fail-closed Agent SDK).
+- **`helix/core/`** — the pipeline and the Atlas. `state.py`
+  (`PipelineState`), `agents.py` (markdown agents + table-driven
+  context/mapping), `stages.py`, `gates.py`, `transitions.py` (the single
+  `next_stage` resolver), `plan.py` (run control), `decisions.py`
+  (`DecisionCard`), `snapshots.py` (content-addressed DAG + git-ops),
+  `atlas.py` (frontmatter store + the canonical `iter_pages`),
+  `atlas_index.py` (SQLite graph), `embed.py`, `recall.py`, `lint.py`,
+  `ingest.py`, `hot.py`.
+- **`helix/orchestrator/loop.py`** — the only runner; owns `advance`, the
+  per-stage unit (run → snapshot → gate → transition).
+- **`helix/`** — `io.py` (the standardized client-IO seam: sampling +
+  elicitation), `llm.py` (chokepoint → sampling), `config.py` (paths +
+  limits), `sandbox.py`, `runs.py` (the bounded run registry), `app.py`
+  (facade), `agent_iface.py` (pure tool bodies), `cli.py` (init + mcp).
+- **`helix/mcp/`** — `server.py` (FastMCP: tools, resources, prompts),
+  `client_io.py` (the MCP-backed `ClientIO`). The only modules that import
+  the `mcp` SDK.
 - **`helix/builtin_agents/*.md`** — the six agents as markdown.
 
 ## Key invariants
 
-- `helix.core` and `helix.orchestrator.loop` MUST import without langgraph or
-  litellm (a manual `sys.modules` check guards this).
-- Both orchestrators route via `core.transitions.next_stage`. Add routing
-  logic there, never in an orchestrator. `tests/test_conformance.py` enforces
-  parity.
-- A snapshot must never call an LLM. `mint_snapshot` only serializes and
-  content-addresses; it reuses the stage's decision text as the digest.
-- All LLM output to disk passes `sandbox.sanitize_atlas_writes` /
-  `sanitize_code_artifacts`. `Atlas._safe_resolve` is defense-in-depth.
-- `sandbox.py` imports `PageWrite` from `core.atlas` (store only, no sandbox
-  import); `core.ingest` is the only module importing sandbox, so no cycle.
-- Auth precedence is OAuth-wins (`config.ModelConfig.default`); the agent gate
-  in `agent_iface.run_permission_decision` is fail-closed.
+- `helix.core`, `helix.io`, and `helix.orchestrator.loop` import without
+  `mcp` or `fastembed`. SDK contact is confined to `helix/mcp/`; the
+  embedding model is lazy-imported inside `helix.core.embed`.
+- All pipeline routing goes through `core.transitions.next_stage`. Add
+  routing logic there, never in the orchestrator.
+- A snapshot never calls an LLM. `mint_snapshot` serializes and
+  content-addresses; it stores the stage's Decision Card as the digest.
+- The model is driven only via the client (MCP sampling). `llm.call_llm`
+  resolves the bound `ClientIO` from `helix.io`; nothing holds API keys.
+- Run control is the run-scoped `Plan` (`core.plan`), threaded like
+  `ask`/`interactive` — never a `PipelineState` field. `autonomy_until` is a
+  compat constructor.
+- Model-controlled strings reaching the filesystem are confined by
+  `sandbox`: page/artifact content via `sanitize_atlas_writes` /
+  `sanitize_code_artifacts`; project / run / bundle names (the snapshot,
+  runs, and hot path roots) via `validate_project_name`. `Atlas._safe_resolve`
+  is defense-in-depth. `sandbox` imports only `PageWrite` from `core.atlas`
+  (store, no sandbox import), so although `core.ingest`, `core.snapshots`,
+  and `core.hot` import `sandbox` for these validators, there is no cycle.
+- One page scan: `core.atlas.iter_pages`. `atlas_index`, `embed`, and
+  `recall` adapt it rather than re-walking the tree.
 
 ## Test patterns
 
 - `tests/conftest.py` isolates `HELIX_HOME` to a tmp dir and patches
-  `helix.core.agents.call_llm_json`, routing fake JSON by system-prompt
-  keyword.
-- The conformance test runs one scenario through `engine="loop"` and
-  `engine="sdk"` and asserts identical results (skips if langgraph absent).
+  `helix.core.agents.call_llm_json` (the patch point above `call_llm`),
+  routing fake JSON by system-prompt keyword.
+- MCP behaviour is exercised end to end with
+  `mcp.shared.memory.create_connected_server_and_client_session`, supplying
+  fake `sampling`/`elicitation` callbacks.
+- Optional-dependency paths (`mcp`, `fastembed`) are guarded with
+  `pytest.importorskip`; the surrounding logic is tested model-free via
+  injected functions.

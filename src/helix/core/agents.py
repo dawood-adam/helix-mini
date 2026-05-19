@@ -22,6 +22,7 @@ import yaml
 from ..llm import call_llm_json
 from ..sandbox import sanitize_atlas_writes, sanitize_code_artifacts
 from .atlas import Atlas, Page
+from .decisions import DecisionCard
 from .ingest import ingest_folder
 from .state import PipelineState
 
@@ -287,27 +288,31 @@ _MAP = {
 _DETERMINISTIC = {"validator": _deterministic_validator}
 
 
-def run_agent(stage: str, state: PipelineState, ctx: AgentCtx) -> tuple[dict, float]:
-    """Run one stage's agent. Returns ``(state_updates, cost)``.
+def run_agent(
+    stage: str, state: PipelineState, ctx: AgentCtx
+) -> tuple[dict, int, DecisionCard]:
+    """Run one stage's agent. Returns ``(state_updates, tokens, decision_card)``.
 
-    Deterministic agents cost 0.0 and never touch the LLM.
+    The Decision Card is the single structured output every agent produces;
+    deterministic agents (and any LLM that omits it) get a generic card.
+    Deterministic agents cost 0 tokens and never touch the LLM.
     """
     agent = load_agent(stage, ctx.project_dir)
     if agent.kind == "deterministic":
         fn = _DETERMINISTIC.get(stage)
         if fn is None:
             raise AgentInputError(f"No deterministic impl registered for '{stage}'")
-        return fn(state, ctx), 0.0
+        return fn(state, ctx), 0, DecisionCard.from_response(None, stage)
 
     try:
         user = _CONTEXT[stage](state, ctx)
     except AgentInputError as e:
-        return {"error": str(e)}, 0.0
+        return {"error": str(e)}, 0, DecisionCard.from_response(None, stage)
 
     model = ctx.model_config.model_for_stage(agent.model_stage)
-    resp, cost = call_llm_json(model=model, system=agent.system, user=user)
+    resp, tokens = call_llm_json(model=model, system=agent.system, user=user)
     if agent.atlas_write:
         writes = sanitize_atlas_writes(resp.get("atlas_writes", []), ctx.atlas.root)
         if writes:
             ctx.atlas.write(writes, f"{stage} | {state.project_name}")
-    return _MAP[stage](resp, state, ctx), cost
+    return _MAP[stage](resp, state, ctx), tokens, DecisionCard.from_response(resp, stage)
