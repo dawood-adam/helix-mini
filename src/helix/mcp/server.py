@@ -427,15 +427,28 @@ def _start_wizard(io, folder: str) -> str:
     else:
         autonomy_until = ""
 
-    src = folder
+    src = (folder or "").strip()
     if not src:
         fd = _ask(ask_text("Source folder to ingest (path)", "folder"))
         if not fd:
             return "Setup cancelled."
-        src = str(fd.get("folder", ""))
-    fp = Path(src).expanduser()
-    if not fp.is_dir():
-        return f"Error: not a directory: {src}"
+        src = str(fd.get("folder", "")).strip()
+    fp = Path(src or "sources").expanduser()
+    if fp.exists() and not fp.is_dir():
+        return (f"{fp} is a file, not a folder. Give a directory of "
+                "sources, or drop files into atlas/inbox/ and run "
+                "hx_atlas_ingest.")
+    # No dead-end on missing sources: create the folder and tell the user
+    # exactly how to add material, rather than erroring out or starting a
+    # run that would only fail at Scout.
+    fp.mkdir(parents=True, exist_ok=True)
+    if not any(p.is_file() for p in fp.rglob("*")):
+        return (
+            f"{fp.resolve()} has no source material yet — the folder is "
+            "ready for you. Add papers / PDFs / code / data there, or drop "
+            "them into atlas/inbox/ and run hx_atlas_ingest, then say "
+            '"start helix" again. No run was started; nothing was lost.'
+        )
 
     plan = Plan.from_autonomy_until(autonomy_until)
     run_id = runs.start_run(name, plan)

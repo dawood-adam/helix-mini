@@ -44,7 +44,7 @@ state and the client confirms them before running.
 
 | Tool | Purpose |
 |---|---|
-| `hx_start` | Guided setup wizard, then start a run. |
+| `hx_start` | Guided setup wizard; creates the source folder if missing and guides you, then starts a run. |
 | `run_pipeline` | Run on a folder. `autonomy_until`: `''`, a stage, or `END`. |
 | `resume_pipeline` | Rebuild a snapshot and re-enter at any stage/branch. |
 | `hx_run_status` | The latest run's status (survives a restart). |

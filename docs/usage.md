@@ -48,6 +48,11 @@ helix> ...
 the pipeline. `run_pipeline(folder, autonomy_until)` is the same run without
 the wizard.
 
+If the source folder has no material yet, `hx_start` does not error or start
+a run that would only fail at Scout — it creates the folder and tells you
+where to add files (directly, or via `atlas/inbox/` + `hx_atlas_ingest`).
+Add the sources, then say "start helix" again.
+
 ## Control modes
 
 The control mode becomes a `Plan` that governs every gate:

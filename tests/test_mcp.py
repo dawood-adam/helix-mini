@@ -303,3 +303,37 @@ def test_canonical_prompts_over_mcp():
     assert names == ["helix_freeze", "helix_ingest", "helix_lint",
                      "helix_resume", "helix_run"]
     assert "./papers" in run_text and "hx_start" in run_text  # real workflow
+
+
+def test_hx_start_creates_missing_source_folder(project, tmp_path):
+    pytest.importorskip("mcp")
+    import anyio
+    import mcp.types as T
+    from mcp.shared.memory import create_connected_server_and_client_session as conn
+
+    from helix import runs
+    from helix.mcp.server import mcp as server
+
+    fresh = tmp_path / "fresh-src"  # does not exist; no files
+    answers = {"name": "demo-proj", "description": "q",
+               "mode": "fully autonomous"}
+
+    async def elicit_cb(context, params):
+        schema = getattr(params, "requestedSchema", None) or {}
+        field = next(iter(schema.get("properties", {})), "")
+        return T.ElicitResult(action="accept",
+                              content={field: answers.get(field, "x")})
+
+    async def drive():
+        async with conn(server, elicitation_callback=elicit_cb) as client:
+            await client.initialize()
+            res = await client.call_tool("hx_start", {"folder": str(fresh)})
+            return "".join(c.text for c in res.content if c.type == "text")
+
+    txt = anyio.run(drive)
+    # helped instead of dead-ending: folder created, actionable guidance,
+    # and no doomed run was started.
+    assert fresh.is_dir()
+    assert "no source material yet" in txt
+    assert "atlas/inbox" in txt and "No run was started" in txt
+    assert runs.get_record(project="demo-proj") is None
