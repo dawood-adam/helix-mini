@@ -18,6 +18,11 @@ Three components behind one MCP server:
 - **Snapshots** — a content-addressed DAG of every transition, with branch,
   freeze, fork, and resume.
 
+<p align="center">
+  <img src="docs/workflow_process_and_version_control_diagram.svg" alt="Helix workflow and version-control diagram" width="100%">
+</p>
+
+
 ## Requirements
 
 - Python ≥ 3.11
