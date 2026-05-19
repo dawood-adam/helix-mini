@@ -86,7 +86,7 @@ offers to raise it — it never crashes or loses work.
 <project>/
 ├── helix.toml            limits + atlas path
 ├── question.md
-├── .mcp.json             registers helix-mcp
+├── .mcp.json             registers the helix MCP server
 ├── atlas/                the wiki (see docs/atlas.md)
 │   ├── inbox/  raw/  sources/  concepts/  entities/  projects/
 │   ├── index.md  log.md  ATLAS.md

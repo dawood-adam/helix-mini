@@ -6,14 +6,21 @@ service and no credential configuration.
 
 ## Connection
 
-`helix init` writes:
+`helix init` writes a server pinned to the interpreter Helix is installed
+in (`sys.executable` of the process running `helix init`):
 
 ```json
-{ "mcpServers": { "helix": { "command": "helix-mcp" } } }
+{ "mcpServers": { "helix": {
+  "command": "/abs/path/to/python",
+  "args": ["-m", "helix.mcp.server"]
+} } }
 ```
 
-`helix-mcp` is the console entry point (`helix.mcp.server:main`). `helix mcp`
-runs the same server in the foreground for debugging.
+This is deliberate: the client resolves a bare `command` against its own
+`PATH`, which need not include the environment's `bin/`. The absolute
+interpreter + `-m helix.mcp.server` is PATH-independent and portable.
+`helix-mcp` (console entry point `helix.mcp.server:main`) and `helix mcp`
+run the same server by hand for debugging.
 
 ## Sampling and elicitation
 
