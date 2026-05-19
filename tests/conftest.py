@@ -13,7 +13,7 @@ def project(tmp_path, monkeypatch):
     src.mkdir()
     (src / "paper.md").write_text("# Paper\nCFD cardiac simulation findings.")
     (tmp_path / "helix.toml").write_text(
-        '[atlas]\npath = "atlas"\n\n[limits]\ncost_cap = 10.0\ncall_cap = 0\n'
+        '[atlas]\npath = "atlas"\n\n[limits]\ntoken_cap = 0\ncall_cap = 0\n'
     )
     return src
 

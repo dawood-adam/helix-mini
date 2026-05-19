@@ -1,18 +1,23 @@
-"""autonomy_until: auto-proceed gates before a stage, then ask."""
+"""Run control: the Plan engine. ``autonomy_until`` is now a Plan
+constructor (compat), so existing callers/tests are unchanged."""
 
 from __future__ import annotations
 
 from helix import app
 from helix.config import ModelConfig
-from helix.core.gates import GateDecision, gate_is_auto
+from helix.core.gates import GateDecision
+from helix.core.plan import Plan
+from helix.core.transitions import stages
 
 
-def test_gate_is_auto_window():
-    assert gate_is_auto("scout", "builder") is True
-    assert gate_is_auto("planner", "builder") is True
-    assert gate_is_auto("builder", "builder") is False  # ask AT builder onward
-    assert gate_is_auto("scout", "") is False  # full HITL
-    assert gate_is_auto("critic_results", "END") is True  # fully autonomous
+def test_plan_from_autonomy_until_window():
+    order = list(stages())
+    p = Plan.from_autonomy_until("builder")
+    assert p.gate_auto("scout", order) is True
+    assert p.gate_auto("planner", order) is True
+    assert p.gate_auto("builder", order) is False  # ask AT builder onward
+    assert Plan.from_autonomy_until("").gate_auto("scout", order) is False
+    assert Plan.from_autonomy_until("END").gate_auto("critic_results", order) is True
 
 
 def test_autonomy_until_builder_asks_only_from_builder(project, fake_llm):

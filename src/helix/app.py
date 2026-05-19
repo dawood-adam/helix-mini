@@ -1,4 +1,8 @@
-"""Facade — pick an orchestrator and run. Used by the CLI and the agent."""
+"""Facade — run the pipeline. Used by the CLI, the agent helpers, and tests.
+
+One orchestrator (the plain loop). The MCP server is the drive surface;
+this stays as the thin in-process entry point the loop runs behind.
+"""
 
 from __future__ import annotations
 
@@ -6,18 +10,9 @@ from pathlib import Path
 
 from .config import ModelConfig, atlas_path
 from .core.atlas import Atlas
+from .core.plan import Plan
 from .core.state import PipelineState
-
-
-def get_runner(engine: str = "loop"):
-    """Return the orchestrator module: ``loop`` (default) or ``sdk``."""
-    if engine == "sdk":
-        from .orchestrator import langgraph_runner
-
-        return langgraph_runner
-    from .orchestrator import loop
-
-    return loop
+from .orchestrator import loop
 
 
 def run(
@@ -25,17 +20,18 @@ def run(
     *,
     model_config: ModelConfig | None = None,
     autonomy_until: str = "",
+    plan: Plan | None = None,
     research_question: str = "",
+    project_name: str = "",
     ask=None,
     interactive: bool | None = None,
     progress_fn=None,
-    engine: str = "loop",
 ) -> PipelineState:
     atlas = Atlas(atlas_path())
-    return get_runner(engine).run_project(
+    return loop.run_project(
         folder, atlas, model_config,
-        autonomy_until=autonomy_until,
-        research_question=research_question,
+        autonomy_until=autonomy_until, plan=plan,
+        research_question=research_question, project_name=project_name,
         ask=ask, interactive=interactive, progress_fn=progress_fn,
     )
 
@@ -47,15 +43,16 @@ def resume(
     model_config: ModelConfig | None = None,
     start_at: str | None = None,
     autonomy_until: str = "",
+    plan: Plan | None = None,
     branch: str = "main",
     ask=None,
     interactive: bool | None = None,
     progress_fn=None,
-    engine: str = "loop",
 ) -> PipelineState:
     atlas = Atlas(atlas_path())
-    return get_runner(engine).resume_project(
+    return loop.resume_project(
         project, snapshot_id, atlas, model_config,
-        start_at=start_at, autonomy_until=autonomy_until, branch=branch,
+        start_at=start_at, autonomy_until=autonomy_until, plan=plan,
+        branch=branch,
         ask=ask, interactive=interactive, progress_fn=progress_fn,
     )

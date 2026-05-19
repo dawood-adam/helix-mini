@@ -1,8 +1,8 @@
 """Gate model — the human-in-the-loop control between every stage.
 
 After each stage the orchestrator presents a report; the human may proceed,
-send the run back to ANY stage with contextualized feedback, or stop. An
-``autonomy_until`` window auto-proceeds early gates. The deterministic
+send the run back to ANY stage with contextualized feedback, or stop. The
+run-scoped ``Plan`` decides whether a gate auto-proceeds. The deterministic
 validator auto-routes hard flags back to the builder (the old sanity route),
 feeding the flags in as feedback.
 """
@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .agents import stage_order
+from .plan import Plan
 from .state import PipelineState
 
 
@@ -36,20 +37,6 @@ class GateReport:
 Asker = "callable[[GateReport], GateDecision]"
 
 
-def gate_is_auto(after_stage: str, autonomy_until: str) -> bool:
-    """Whether the gate after ``after_stage`` auto-proceeds."""
-    au = (autonomy_until or "").strip()
-    if au in ("", "none"):
-        return False
-    if au == "END":
-        return True
-    order = stage_order()
-    try:
-        return order.index(after_stage) < order.index(au)
-    except ValueError:
-        return False
-
-
 def record_feedback(state: PipelineState, frm: str, target: str, note: str) -> None:
     state.human_feedback.append({
         "from_stage": frm,
@@ -67,7 +54,7 @@ def _summary(state: PipelineState) -> dict:
         "artifacts": len(state.code_artifacts or []),
         "results": len(state.experiment_results or []),
         "verdict": state.verdict or "-",
-        "cost": round(state.cost_so_far, 4),
+        "tokens": state.tokens_used,
         "iterations": state.build_iterations,
     }
 
@@ -80,9 +67,10 @@ def decide_gate(
     *,
     ask=None,
     interactive: bool = False,
+    plan: Plan | None = None,
 ) -> GateDecision:
     """Resolve the gate after ``after_stage``."""
-    auto = gate_is_auto(after_stage, state.autonomy_until)
+    auto = (plan or Plan()).gate_auto(after_stage, stage_order())
     can_ask = bool(ask) and interactive and not auto
 
     if after_stage == "validator":

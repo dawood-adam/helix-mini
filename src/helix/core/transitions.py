@@ -1,7 +1,7 @@
 """The single next-stage resolver.
 
-Both orchestrators (plain loop and LangGraph) call ``next_stage`` so they can
-never diverge on routing — the conformance test relies on this (Risk A).
+All pipeline routing goes through ``next_stage`` — one source of truth for
+proceed / goto / stop, deliberately kept out of the orchestrator.
 """
 
 from __future__ import annotations

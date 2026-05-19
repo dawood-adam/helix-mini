@@ -16,7 +16,7 @@ def test_full_run_loop(project, fake_llm):
         "scout", "critic_methods", "planner", "builder", "validator",
     ]
     assert "critic_results" in r.completed_stages
-    assert r.cost_so_far > 0
+    assert r.tokens_used > 0
     # One snapshot per stage executed.
     snaps = list_snapshots("src-papers")
     assert len(snaps) == len(r.completed_stages)

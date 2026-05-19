@@ -1,141 +1,109 @@
 # Architecture
 
-## The mental model
+## Mental model
 
-Helix has three layers, from the inside out:
+Helix has three layers, inside out:
 
-1. **The core** (`helix/core/`) is the pipeline itself: the stages, the gate
-   logic, the routing, the Atlas wiki, and snapshots. It is pure Python and
-   imports neither `langgraph` nor `litellm`.
-2. **An orchestrator** runs the core. There are two, and they are
-   interchangeable: a plain loop (the default) and a LangGraph graph (the
-   `helix[sdk]` extra).
-3. **A drive mode** invokes an orchestrator: an agentic CLI, the `helix
-   agent` command, or your own code.
+1. **Core** (`helix/core/`) — the pipeline and the Atlas. Pure Python; it
+   imports neither the MCP SDK nor an embedding model.
+2. **Orchestrator** (`helix/orchestrator/loop.py`) — one runner that steps
+   the core: run a stage, snapshot, consult the gate, transition.
+3. **Drive surface** (`helix/mcp/`) — a stdio MCP server. The client (Claude
+   Code) calls its tools; the server calls back into the client for model
+   completions and user input.
 
-The key design rule: both orchestrators step the pipeline through one shared
-function (`loop.advance`), which routes through one resolver
-(`core.transitions.next_stage`). They cannot disagree about what runs next.
-`tests/test_conformance.py` runs the same scenario through both and asserts
-the results are identical.
-
-## Layers
-
-```mermaid
-graph TD
-    subgraph drive["Drive modes"]
-      CLI["agentic CLI (Claude Code)<br/>default, no API key"]
-      AGENT["helix agent<br/>Claude Agent SDK, fail-closed"]
-      LIB["your code / API"]
-    end
-    subgraph orch["Orchestrators"]
-      LOOP["loop.py<br/>plain loop, default"]
-      LG["langgraph_runner.py<br/>helix[sdk]"]
-    end
-    subgraph core["core/  (no langgraph, no litellm)"]
-      ST["stages.py"]
-      AG["agents.py + builtin_agents/*.md"]
-      GA["gates.py — HITL + autonomy"]
-      TR["transitions.py — next_stage"]
-      SN["snapshots.py — content-addressed DAG"]
-      AT["atlas.py / ingest.py"]
-      DE["decisions.py"]
-    end
-    CLI --> LOOP
-    AGENT --> LOOP
-    LIB --> LOOP
-    LIB --> LG
-    LOOP -->|advance| TR
-    LG -->|advance| TR
-    LOOP --> ST
-    LG --> ST
-    ST --> AG
-    ST --> GA
-    GA --> TR
-    ST --> SN
-    AG --> AT
-    ST --> DE
-    AG -->|cli/ models| ENG["llm_cli.py → claude CLI"]
-    AG -->|api models| LIT["litellm — helix[sdk]"]
-```
-
-## Pipeline flow
-
-```mermaid
-graph LR
-    src["source folder"] --> scout
-    scout --> g1{{gate}} --> critic_methods
-    critic_methods --> g2{{gate}} --> planner
-    planner --> g3{{gate}} --> builder
-    builder --> g4{{gate}} --> validator
-    validator --> g5{{sanity}}
-    g5 -->|hard flags| builder
-    g5 -->|pass| critic_results
-    critic_results --> g6{{gate}}
-    g6 -->|ship / abandon| done["shipped artifacts"]
-    g6 -.->|iterate / send back to ANY stage| scout
-    classDef llm fill:#EFF4FF,stroke:#2563EB
-    classDef det fill:#FEF6E7,stroke:#B45309
-    class scout,critic_methods,planner,builder,critic_results llm
-    class validator det
-```
-
-A gate runs after every stage. You can proceed, send the run back to any
-earlier stage with a note, or stop. The note is stored in
-`state.human_feedback` and injected into that stage's prompt when it re-runs.
-`validator` is deterministic and calls no LLM; a hard band violation routes
-back to `builder` automatically, carrying the flags as feedback.
-
-## Autonomy and the cost ceiling
-
-Autonomy is a single value, `autonomy_until`:
-
-- empty: ask at every gate (the default)
-- a stage name: auto-proceed the gates before that stage, then ask
-- `END`: fully autonomous
-
-It can change on every run, including a resume.
-
-Cycling is unbounded by design. The only limit is a cost and call ceiling in
-`helix.toml [limits]`. When a run reaches it, Helix does not crash. In an
-interactive run it asks whether to continue (which doubles the ceiling) or
-stop. In an autonomous run it takes a snapshot, stops, and prints the resume
-command.
-
-## Snapshots
-
-Helix takes a snapshot after every stage and every send-back. A snapshot is a
-deterministic serialization of state plus the decision text the stage already
-produced, so it costs no LLM calls. Artifact bytes are content-addressed under
-`.helix/snapshots/<project>/objects/`, stored once per hash, so a snapshot
-stays a few kilobytes even after hundreds of cycles. Each snapshot records its
-`parent` and `branch`, so the history is a real DAG: list, show, diff,
-diagram, revert, and resume from any point (branch by resuming with
-`--branch`). See [snapshots.md](snapshots.md).
-
-## Storage layout
+The model lives entirely on the client side. When a stage needs an LLM, the
+server issues an MCP `sampling/createMessage`; the client runs it and returns
+the text. Helix stores no credentials.
 
 ```
-<project>/                 # the current directory, or $HELIX_HOME
-├── helix.toml             # [atlas].path, [limits], [default]/[lightspeed], [cli.*]
-├── .helix/
-│   ├── .env               # CLAUDE_CODE_OAUTH_TOKEN or API keys
-│   └── snapshots/<proj>/  # <id>.json, index.json, objects/<sha>
-├── atlas/                 # the persistent wiki (path is configurable)
-│   ├── index.md  log.md  sources/  concepts/  entities/
-│   └── projects/<proj>/   # overview.md, decisions.md, timeline.md,
-│       └── artifacts/     #   sandbox-confined generated code
-├── agents/<stage>.md      # optional per-project agent overrides
-└── raw/<proj>/            # immutable copies of the ingested input
+  Claude Code (MCP client)
+      │  tools / resources / prompts        ▲ sampling · elicitation
+      ▼                                     │
+  helix-mcp  (helix/mcp/server.py)  ── helix/io.py: the one client-IO seam
+      │
+      ▼
+  app.py ─► orchestrator/loop.py ─► core/  (stages · gates · transitions
+                                            · plan · snapshots · Atlas)
+```
+
+## The client-IO seam
+
+`helix/io.py` is the single place anything is sent back to the client. It
+exposes two operations behind one bound object:
+
+- `sample(...)` — a model completion (MCP sampling).
+- `elicit(...)` — a structured question to the user (MCP elicitation), built
+  with `ask_text` / `ask_choice` / `ask_multi` / `ask_confirm`.
+
+The pipeline core is synchronous and deep; the MCP session is asynchronous.
+The seam bridges them once (an `anyio` worker thread for the run, hopping
+back to the event loop per call). `helix/mcp/client_io.py` is the only
+implementation; tests inject a scripted one. The same seam powers model
+calls, HITL gates (`gate_asker`), the setup wizard, and tier promotion — one
+mechanism, used uniformly.
+
+## A step
+
+`loop.advance` is the unit:
+
+1. Run the stage (`stages.run_stage` → `agents.run_agent`). The agent emits
+   its domain output plus a **Decision Card** (`core.decisions`).
+2. Mint a snapshot. No LLM call — it serializes state and reuses the
+   Decision Card as the human digest.
+3. Resolve the gate (`gates.decide_gate`): the run-scoped **Plan**
+   (`core.plan`) decides whether this transition auto-proceeds or asks. An
+   ask goes through the client-IO seam as elicitation; a decline pauses the
+   run resumably.
+4. Transition (`transitions.next_stage`): proceed to the next stage, jump
+   back to any stage with a directive, or stop.
+
+Routing lives only in `transitions.next_stage`. The Plan replaces the older
+`autonomy_until` string, which survives as a constructor for compatibility.
+
+## Run control
+
+A `Plan` is run-scoped configuration, threaded through the loop alongside
+the gate asker — never persisted in `PipelineState`. It governs gate
+autonomy (auto vs. ask, per stage or window) and can inject a per-stage
+directive through the existing feedback channel. `runs.py` keeps a bounded
+registry: a record and event log per run under `.helix/runs/`, plus the live
+`Plan` so `hx_run_plan_set` can steer a run and `hx_run_status` /
+`hx_run_events` can observe it. History survives a server restart; live
+continuation is via snapshots and resume.
+
+## The bound on cycling
+
+Cycling is unbounded by design; the only limit is a token/call ceiling in
+`helix.toml [limits]`. Sampling does not report usage to the server, so the
+token figure is an estimate of the prompt and response text the server
+handled. Reaching the ceiling pauses the run (resumable) or, interactively,
+offers to raise it — it never crashes or loses work.
+
+## Storage
+
+```
+<project>/
+├── helix.toml            limits + atlas path
+├── question.md
+├── .mcp.json             registers helix-mcp
+├── atlas/                the wiki (see docs/atlas.md)
+│   ├── inbox/  raw/  sources/  concepts/  entities/  projects/
+│   ├── index.md  log.md  ATLAS.md
+│   └── projects/<id>/_hot.md
+├── forks/                exported snapshot bundles
+└── .helix/
+    ├── snapshots/<project>/   <id>.json, index.json, refs.json, objects/
+    ├── runs/<run_id>/         record.json, events.jsonl
+    └── embeddings.json        body-hash-keyed vector cache
 ```
 
 ## Invariants
 
-- Nothing in `helix/core/` or `orchestrator/loop.py` imports `langgraph` or
-  `litellm` at module load.
-- All routing lives in `core/transitions.py`. Both orchestrators go through
-  `loop.advance`.
+- `helix.core`, `helix.io`, and `loop.py` import without `mcp` or
+  `fastembed`. SDK contact is confined to `helix/mcp/`.
+- All routing is in `core.transitions.next_stage`.
 - A snapshot never calls an LLM.
-- LLM output reaches disk only through `sandbox.sanitize_atlas_writes` and
-  `sanitize_code_artifacts`.
-- Auth precedence is OAuth-first. The `helix agent` tool gate is fail-closed.
+- The model is reached only through the client-IO seam (MCP sampling).
+- LLM output reaches disk only through the sandbox.
+- One page scan: `core.atlas.iter_pages`.

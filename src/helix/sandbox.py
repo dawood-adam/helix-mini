@@ -27,6 +27,25 @@ class SandboxError(Exception):
     """Raised when LLM output violates sandbox rules."""
 
 
+def validate_project_name(name: str) -> str:
+    """A project / run / bundle name used as a single filesystem path
+    segment. Model-controlled (MCP tool args, ingest-influenced), so it is
+    confined the same way Atlas writes are: no separators, no ``..``, no
+    leading dot. Returns the cleaned name or raises ``SandboxError``."""
+    n = CONTROL_CHAR_PATTERN.sub("", str(name or "")).strip()
+    if (
+        not n
+        or len(n) > 128
+        or n in (".", "..")
+        or ".." in n
+        or n[0] in ".-"
+        or "/" in n
+        or "\\" in n
+    ):
+        raise SandboxError(f"Unsafe project/run name: {name!r}")
+    return n
+
+
 def validate_path(path: str, atlas_root: Path) -> Path:
     if len(path) > MAX_PATH_LENGTH:
         raise SandboxError(f"Path too long ({len(path)} chars): {path[:80]}...")
@@ -79,8 +98,44 @@ def sanitize_atlas_writes(raw_writes: list[dict], atlas_root: Path) -> list[Page
         except SandboxError as e:
             log.warning("Sandbox blocked write: %s", e)
             continue
-        writes.append(PageWrite(path=w["path"], title=title, content=content, summary=summary))
+        writes.append(PageWrite(
+            path=w["path"], title=title, content=content, summary=summary,
+            type=_clean_opt_str(w.get("type")),
+            tier=_clean_opt_str(w.get("tier")),
+            aliases=_clean_str_list(w.get("aliases")),
+            links=_clean_links(w.get("links")),
+        ))
     return writes
+
+
+def _clean_opt_str(v) -> str | None:
+    if not isinstance(v, str):
+        return None
+    v = CONTROL_CHAR_PATTERN.sub("", v).strip()
+    return v[:64] or None
+
+
+def _clean_str_list(v, cap: int = 12) -> list[str] | None:
+    if not isinstance(v, list):
+        return None
+    out = [
+        CONTROL_CHAR_PATTERN.sub("", str(x)).strip()[:MAX_PAGE_TITLE_LENGTH]
+        for x in v[:cap]
+    ]
+    out = [x for x in out if x]
+    return out or None
+
+
+def _clean_links(v) -> dict | None:
+    if not isinstance(v, dict):
+        return None
+    allowed = ("derived_from", "related_to", "contradicts", "cites")
+    out: dict[str, list[str]] = {}
+    for k in allowed:
+        lst = _clean_str_list(v.get(k), cap=50)
+        if lst:
+            out[k] = lst
+    return out or None
 
 
 def validate_artifact_name(name: str, root: Path) -> Path:
