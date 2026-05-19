@@ -14,11 +14,12 @@ This writes:
 - `question.md` — the research question. Edit it.
 - `helix.toml` — configuration: the Atlas path and the run limits.
 - `CLAUDE.md` — instructions the client reads when you say "start helix".
-- `.mcp.json` — registers the `helix-mcp` server for this project.
+- `.mcp.json` — registers the helix MCP server for this project (pinned to
+  the interpreter Helix is installed in, so it is `PATH`-independent).
 
 Add source material anywhere under the project, or drop it into
 `atlas/inbox/` for managed ingestion. Open the folder in Claude Code; it
-starts `helix-mcp` automatically.
+starts the server automatically.
 
 ## Driving a run
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 import click
@@ -68,8 +69,15 @@ def init(name):
         f"call_cap = {config.CALL_CAP_DEFAULT}\n"
     )
     # Lets Claude Code auto-discover + spawn the helix MCP server here.
+    # Use the absolute interpreter that has helix installed (the one running
+    # `helix init`) + `-m helix.mcp.server`, not the bare `helix-mcp` name:
+    # the client resolves `command` against its own PATH, which may not
+    # include the env's bin dir. This form is PATH-independent and portable.
     (d / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {"helix": {"command": "helix-mcp"}}}, indent=2)
+        json.dumps({"mcpServers": {"helix": {
+            "command": sys.executable,
+            "args": ["-m", "helix.mcp.server"],
+        }}}, indent=2)
         + "\n"
     )
     click.echo(f"Created: {d}/")

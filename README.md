@@ -34,15 +34,19 @@ cd my-research
 ```
 
 `helix init` writes `question.md`, `helix.toml`, `CLAUDE.md`, and an
-`.mcp.json` that registers the server:
+`.mcp.json` that registers the server, pinned to the interpreter Helix is
+installed in so it works regardless of the client's `PATH`:
 
 ```json
-{ "mcpServers": { "helix": { "command": "helix-mcp" } } }
+{ "mcpServers": { "helix": {
+  "command": "/abs/path/to/python",
+  "args": ["-m", "helix.mcp.server"]
+} } }
 ```
 
-Open the project folder in Claude Code. It launches `helix-mcp`
-automatically; there is nothing else to configure. (`helix mcp` runs the
-server by hand for debugging.)
+Open the project folder in Claude Code. It launches the server
+automatically; there is nothing else to configure. (`helix mcp`, or
+`helix-mcp`, runs the same server by hand for debugging.)
 
 ## Quick usage
 
