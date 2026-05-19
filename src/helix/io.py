@@ -62,6 +62,25 @@ class ClientUnavailable(Exception):
     crashing the run and losing all progress."""
 
 
+class NeedsModel(Exception):
+    """Agent-driven mode: a stage reached its model call and there is no
+    server-side model. The bound JSON responder raises this to *suspend* the
+    stage — the step driver catches it at the ``advance`` boundary (before any
+    snapshot or Atlas write), emits ``stage``'s rendered prompt to the client
+    agent, and resumes by re-entering ``advance`` with the agent's answer
+    injected.
+
+    Standardized like :class:`Declined` / :class:`ClientUnavailable`: control
+    flow, not an error. Carries the pinned prompt so the suspend is faithful
+    to exactly what the agent is asked to answer."""
+
+    def __init__(self, stage: str, system: str, user: str):
+        super().__init__(f"model needed for stage {stage!r}")
+        self.stage = stage
+        self.system = system
+        self.user = user
+
+
 # --- Typed schema builders (the "almost programmatic" vocabulary) ----------
 #
 # MCP elicitation schemas are intentionally flat: a single object whose
@@ -105,11 +124,10 @@ def ask_confirm(message: str, field_name: str = "proceed") -> ElicitRequest:
 
 @runtime_checkable
 class ClientIO(Protocol):
-    """What the MCP client offers back to the server. One per active run."""
+    """What the MCP client offers back to the server. One per active run.
 
-    def sample(self, *, system: str, user: str, max_tokens: int) -> Any:
-        """Run an LLM completion on the client. Returns an ``LLMResponse``
-        (typed as Any here to avoid importing llm at module load)."""
+    Elicitation only — the model is the *client agent* driving the tool
+    loop (hx_step / hx_submit), not a server-side sampling callback."""
 
     def elicit(self, req: ElicitRequest) -> ElicitResult:
         """Ask the user a structured question on the client."""

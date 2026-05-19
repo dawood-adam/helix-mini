@@ -1,7 +1,9 @@
 # Forge — the pipeline
 
 Forge turns source material into validated artifacts through six stages, with
-a human checkpoint at every transition.
+a human checkpoint at every transition. A `model` stage is answered by the
+client agent through the tool loop (`hx_step` renders its prompt,
+`hx_submit` feeds back the answer); the server runs no model itself.
 
 ```
 Scout → Methods Critic → Planner → Builder → Validator → Results Critic
@@ -66,15 +68,16 @@ Declining the gate prompt pauses the run resumably.
 (status, current stage, last snapshot, token estimate) and an
 `events.jsonl` transition log, updated at every transition. The live record
 also holds the run's `Plan`, so `hx_run_plan_set` steers it and
-`hx_run_status` / `hx_run_events` observe it. The run still executes within
-the tool call (HITL stays synchronous via elicitation); the registry adds
-observability and survives a server restart. Live continuation is via
-snapshots and `resume_pipeline`.
+`hx_run_status` / `hx_run_events` observe it. A run spans many tool calls
+(`hx_step` / `hx_submit`); the suspended step is persisted to
+`.helix/runs/<project>.pending.json` so even a server restart between steps
+is resumable. The registry adds observability and survives a restart; live
+continuation is via snapshots and `resume_pipeline`.
 
 ## Cost ceiling
 
 Cycling has no fixed cap. `helix.toml [limits]` sets `token_cap` and
-`call_cap`. Sampling does not report usage to the server, so the token count
-is an estimate of the prompt and response text the server itself handled.
-Reaching a cap pauses the run with a resumable snapshot; interactively, you
-are offered the choice to raise the ceiling and continue.
+`call_cap`. The token count is an estimate (≈ chars/4) of each stage's
+rendered prompt plus the agent's submitted answer. Reaching a cap pauses the
+run with a resumable snapshot; interactively, you are offered the choice to
+raise the ceiling and continue.

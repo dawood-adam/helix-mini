@@ -133,6 +133,29 @@ def abort_run(run_id: str, note: str) -> None:
     _LIVE.pop(run_id, None)
 
 
+# --- Pending step (agent-driven suspend/resume across tool calls) -----------
+# The run is suspended at an LLM stage waiting for the client agent's answer.
+# Persisted to disk (not just _LIVE) so a server restart between hx_step and
+# hx_submit is still resumable. Keyed by project.
+
+
+def _pending_path(project: str) -> Path:
+    return _root() / f"{validate_project_name(project)}.pending.json"
+
+
+def set_pending(project: str, data: dict) -> None:
+    _pending_path(project).write_text(json.dumps(data, indent=2))
+
+
+def get_pending(project: str) -> dict | None:
+    p = _pending_path(project)
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def clear_pending(project: str) -> None:
+    _pending_path(project).unlink(missing_ok=True)
+
+
 def _resolve(project: str | None, run_id: str | None) -> str | None:
     if run_id:
         return run_id

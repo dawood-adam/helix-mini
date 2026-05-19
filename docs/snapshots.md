@@ -1,9 +1,11 @@
 # Snapshots — version control
 
 A snapshot is a saved point in a run: the full pipeline state at one
-transition, stamped with the stage, time, parent, and branch. Helix mints
-one after every stage and every send-back. The history is a real DAG —
-inspectable, diffable, branchable, and resumable from any point.
+transition, stamped with the stage, time, parent, and branch. A run opens
+with a `start` snapshot (so it is resumable before the first stage even
+completes), then Helix mints one after every stage and every send-back. The
+history is a real DAG — inspectable, diffable, branchable, and resumable
+from any point.
 
 ## Zero cost
 
@@ -47,11 +49,12 @@ branch name, which keeps an experiment off the main line.
 
 ## Resume and revert
 
-- `resume_pipeline(project, snapshot, at=, branch=)` rebuilds the snapshot's
-  full state, including artifact bytes from the object store, and re-enters
-  the pipeline. By default it re-enters at the snapshot's own stage; `at`
-  picks any stage; `branch` continues on a new branch parented at that
-  snapshot.
+- `resume_pipeline(project, snapshot, at=, branch=, folder=)` rebuilds the
+  snapshot's full state, including artifact bytes from the object store, and
+  re-enters the agent-driven loop — returning the next stage's prompt. By
+  default it re-enters at the snapshot's own stage; `at` picks any stage;
+  `branch` continues on a new branch parented at that snapshot; `folder`
+  roots it at the project regardless of the server's working directory.
 - `snapshot_revert` is the file-level checkout: it writes a snapshot's
   artifacts back to disk and runs nothing.
 
@@ -61,6 +64,7 @@ destructive operation.
 
 ## Pausing
 
-A run that hits the token/call ceiling, or whose gate prompt is declined,
-records a resumable snapshot and stops rather than failing. `hx_run_status`
-reports where it stopped; `resume_pipeline` continues it.
+A run that hits the token/call ceiling, has its gate prompt declined, or
+loses the MCP client mid-run records a resumable snapshot and stops rather
+than failing. `hx_run_status` reports where it stopped; `resume_pipeline`,
+or simply calling `hx_step` again, continues it.

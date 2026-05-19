@@ -93,10 +93,10 @@ to lexical, so it never hard-fails.
 
 ### Embeddings
 
-Semantic mode needs vectors. MCP sampling is chat-only, so embeddings use a
-local model — `fastembed`, an optional extra (`pip install 'helix[embed]'`).
-This is the only model dependency in the system; without it, semantic
-queries fall back to lexical. Vectors are cached in
+Semantic mode needs vectors. The client agent answers only in text, so
+embeddings use a local model — `fastembed`, an optional extra (`pip install
+'helix[embed]'`). This is the only model dependency in the system; without
+it, semantic queries fall back to lexical. Vectors are cached in
 `.helix/embeddings.json`, keyed by the page body's sha256, so only changed
 pages are re-embedded.
 

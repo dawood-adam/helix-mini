@@ -1,42 +1,50 @@
-"""LLM call chokepoint. Every model call funnels through here.
+"""Model-call chokepoint. Every stage model call funnels through here.
 
-Sampling-only: the model is driven by the MCP client (it picks the model,
-holds the credentials, and pays). ``call_llm`` delegates to the client-IO
-seam bound for the current run; with no client bound it raises a clear
-error. Tests patch ``helix.core.agents.call_llm_json`` so they never reach it.
+Agent-driven: Helix has no model of its own and holds no credentials. The
+run binds a JSON *responder* (the step driver) and ``call_llm_json`` routes
+through it — the responder either suspends the stage (``io.NeedsModel``, the
+prompt goes to the client agent) or returns the agent's injected answer.
+There is no server-side sampling. Tests bind a responder (or patch
+``helix.core.agents.call_llm_json``).
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
-from dataclasses import dataclass
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
+# The model-acquisition seam. A run binds a "JSON responder" —
+# ``(model, system, user) -> (parsed_dict, tokens_estimate)`` — and every
+# stage's model call routes through it instead of sampling. Threaded via a
+# contextvar like the IO seam (never a PipelineState field). Unbound = the
+# legacy sampling path, so anything not driven through the step loop is
+# unchanged. The agent-driven responder either raises ``io.NeedsModel`` to
+# suspend the stage, or returns the client agent's injected answer.
+JsonResponder = Callable[[str, str, str], "tuple[dict[str, Any], int]"]
+_RESPONDER: contextvars.ContextVar[JsonResponder | None] = contextvars.ContextVar(
+    "helix_json_responder", default=None
+)
 
-@dataclass
-class LLMResponse:
-    content: str
-    usage: dict[str, int]
-    cost: float
+
+@contextmanager
+def use_responder(fn: JsonResponder | None):
+    """Bind the JSON responder for the duration of one ``advance`` step (set
+    by the step driver). ``None`` is a no-op (keeps the legacy path)."""
+    if fn is None:
+        yield
+        return
+    token = _RESPONDER.set(fn)
+    try:
+        yield
+    finally:
+        _RESPONDER.reset(token)
 
 
-def call_llm(
-    *,
-    model: str,
-    system: str,
-    user: str,
-    temperature: float = 0.3,
-    max_tokens: int = 4096,
-) -> LLMResponse:
-    """Sampling-only: delegate to whatever client IO is bound for this run
-    (the MCP client's model under sampling). Raises a clear error if nothing
-    is bound. Tests patch ``helix.core.agents.call_llm_json`` above this."""
-    from .io import current
-
-    return current().sample(system=system, user=user, max_tokens=max_tokens)
 
 
 def _extract_json_block(text: str) -> str | None:
@@ -69,34 +77,23 @@ def _extract_json_block(text: str) -> str | None:
     return None
 
 
-def call_llm_json(
-    *,
-    model: str,
-    system: str,
-    user: str,
-    temperature: float = 0.2,
-    max_tokens: int = 4096,
-) -> tuple[dict[str, Any], int]:
-    """LLM call expecting JSON. Returns ``(parsed_dict, tokens)``.
+_JSON_DIRECTIVE = (
+    "\n\nYou MUST respond with valid JSON only. No markdown fences, no "
+    "explanation outside the JSON object."
+)
 
-    Sampling never reports usage to the server, so ``tokens`` is an estimate
-    (≈ chars/4) of the prompt + response the server itself handled — enough
-    to bound a run."""
-    resp = call_llm(
-        model=model,
-        system=system + "\n\nYou MUST respond with valid JSON only. No "
-        "markdown fences, no explanation outside the JSON object.",
-        user=user,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    text = resp.content.strip()
+
+def parse_json_text(text: str) -> Any:
+    """Best-effort parse of a model/agent JSON reply: tolerate code fences,
+    salvage the first balanced ``{...}``/``[...]``, else ``{"raw": text}``.
+    Reused to parse the client agent's submitted answer in the step loop."""
+    text = (text or "").strip()
     if text.startswith("```"):
         text = "\n".join(
             l for l in text.split("\n") if not l.strip().startswith("```")
         )
     try:
-        parsed = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError:
         block = _extract_json_block(text)
         try:
@@ -105,8 +102,32 @@ def call_llm_json(
             parsed = None
         if parsed is None:
             log.warning("LLM returned invalid JSON, wrapping as raw content")
-            parsed = {"raw": text}
-    tokens = resp.usage.get("total_tokens") or resp.usage.get("total") or (
-        (len(system) + len(user) + len(resp.content)) // 4
-    )
-    return parsed, int(tokens)
+            return {"raw": text}
+        return parsed
+
+
+def call_llm_json(
+    *,
+    model: str,
+    system: str,
+    user: str,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+) -> tuple[dict[str, Any], int]:
+    """Stage model call expecting JSON. Returns ``(parsed, tokens)``.
+
+    Routes through the bound JSON responder if one is set (agent-driven: it
+    may raise ``io.NeedsModel`` to suspend, or return the agent's answer);
+    otherwise the legacy sampling path. ``tokens`` is an estimate (≈ chars/4)
+    of prompt + response — enough to bound a run."""
+    json_system = system + _JSON_DIRECTIVE
+
+    responder = _RESPONDER.get()
+    if responder is None:
+        raise RuntimeError(
+            "No model seam bound. Helix is agent-driven (no server-side "
+            "sampling): drive the pipeline through hx_step / hx_submit so "
+            "the client agent answers each stage. (Tests bind a responder "
+            "or patch helix.core.agents.call_llm_json.)"
+        )
+    return responder(model, json_system, user)
