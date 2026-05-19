@@ -1,9 +1,9 @@
 """LLM call chokepoint. Every model call funnels through here.
 
 Sampling-only: the model is driven by the MCP client (it picks the model,
-holds the credentials, and pays). ``call_llm`` is wired to MCP
-``sampling/createMessage`` in Phase 1. Until then it raises a clear error;
-tests patch ``helix.core.agents.call_llm_json`` so they never reach it.
+holds the credentials, and pays). ``call_llm`` delegates to the client-IO
+seam bound for the current run; with no client bound it raises a clear
+error. Tests patch ``helix.core.agents.call_llm_json`` so they never reach it.
 """
 
 from __future__ import annotations

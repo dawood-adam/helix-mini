@@ -1,8 +1,8 @@
-"""SQLite edge index over the Atlas link graph (HELIX-v3 §3.4).
+"""SQLite edge index over the Atlas link graph.
 
 Source of truth is the markdown frontmatter ``links:``. This is a
 *rebuildable* in-memory index for fast k-hop traversal — rebuilt per query,
-which is trivial at the hundreds-of-pages scale (v3 §11.1). Persisting it is
+which is trivial at the hundreds-of-pages scale. Persisting it is
 a later optimization; keeping it derived means ``Atlas.write`` stays
 decoupled (no index in the write hot path).
 

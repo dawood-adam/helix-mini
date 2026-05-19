@@ -1,4 +1,4 @@
-"""Hot cache (HELIX-v3 §3.6) — kill the "where were we?" lag.
+"""Hot cache — kill the "where were we?" lag.
 
 At run end a one-page ``atlas/projects/<id>/_hot.md`` is regenerated from the
 snapshot trail (zero-LLM — it reuses the Decision Card already stored). It is

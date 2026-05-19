@@ -1,4 +1,4 @@
-"""The Plan primitive — how a run is controlled (HELIX-v3 §2).
+"""The Plan primitive — how a run is controlled.
 
 A Plan is run-scoped control config, not pipeline data: it is threaded
 through the loop alongside ``ask``/``interactive`` and is NOT a

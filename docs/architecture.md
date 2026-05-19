@@ -105,5 +105,7 @@ offers to raise it — it never crashes or loses work.
 - All routing is in `core.transitions.next_stage`.
 - A snapshot never calls an LLM.
 - The model is reached only through the client-IO seam (MCP sampling).
-- LLM output reaches disk only through the sandbox.
+- LLM output reaches disk only through the sandbox: page/artifact content
+  via `sanitize_*`, and project/run/bundle names via
+  `validate_project_name` at every path root.
 - One page scan: `core.atlas.iter_pages`.

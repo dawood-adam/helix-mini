@@ -3,7 +3,7 @@
 Store only: imports nothing from ``sandbox`` (which imports ``PageWrite``
 from here) so there is no cycle.
 
-Every page carries typed frontmatter (HELIX-v3 §3.3): id / type / tier /
+Every page carries typed frontmatter: id / type / tier /
 aliases (≥1, mandatory) / created+updated / the bi-temporal pair
 (claim_valid_at, last_verified_at) / provenance / links / embeddings. Writes
 stay backward-tolerant — an agent may emit just {path,title,content,summary}

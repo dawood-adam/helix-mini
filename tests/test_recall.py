@@ -70,9 +70,16 @@ def test_semantic_with_injected_embedder(project):
 
 def test_semantic_falls_back_to_lexical_when_unavailable(project):
     root = _atlas(project)
-    # No embed_fn + fastembed absent → graceful fallback, never crashes.
+    # Force the embedder to be unavailable (deterministic regardless of
+    # whether fastembed is installed in the test env): recall must degrade
+    # to lexical, never crash.
+    from helix.core.embed import EmbedUnavailable
+
+    def _down(_texts):
+        raise EmbedUnavailable("forced for test")
+
     refs = recall(root, "remote photoplethysmography camera pulse method",
-                  mode="semantic")
+                  mode="semantic", embed_fn=_down)
     assert refs and refs[0]["mode"] == "lexical"
 
 

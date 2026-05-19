@@ -2,7 +2,7 @@
 
 Wires the core together: run stage → snapshot → gate (HITL / autonomy) →
 transition. Unbounded cycling is safe because the only bound is a configurable
-cost/call ceiling that *pauses* (resumable) instead of failing (Risk E).
+token/call ceiling that *pauses* (resumable) instead of failing.
 """
 
 from __future__ import annotations

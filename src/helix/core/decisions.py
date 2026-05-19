@@ -15,7 +15,7 @@ from pathlib import Path
 
 @dataclass
 class DecisionCard:
-    """The single structured output every agent produces (HELIX-v3 §6).
+    """The single structured output every agent produces.
 
     Source of truth for: the snapshot's human digest, the decision log, gate
     prompts, and (later) Loom / the linter. Agents are *asked* to fill it

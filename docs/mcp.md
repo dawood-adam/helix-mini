@@ -103,4 +103,6 @@ State-changing tools are confirmed by the client (the host's consent model)
 before they run; promotion to a published tier additionally elicits an
 explicit confirmation. All model-generated page and artifact content passes
 the sandbox (`sanitize_atlas_writes`, `sanitize_code_artifacts`) before it
-reaches disk.
+reaches disk, and model-controlled project / run / bundle names are confined
+by `validate_project_name` at every filesystem path root (no separators,
+no `..`).

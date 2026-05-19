@@ -136,7 +136,7 @@ def hx_atlas_put(path: str, title: str, content: str, summary: str = "",
 def hx_atlas_save(title: str, content: str, type: str = "comparison",
                   project: str = "", tier: str = "active") -> str:
     """File an LLM synthesis/comparison answer back into the Atlas as a
-    proper page (HELIX-v3 §3.7)."""
+    proper page."""
     from ..core.ingest import _slug
 
     slug = _slug(title)

@@ -1,4 +1,4 @@
-"""Auto-routing recall (HELIX-v3 §3.5) — the right retrieval per question.
+"""Auto-routing recall — the right retrieval per question.
 
 One entry point, ``recall(root, query, mode="auto")``. A query-shape router
 picks lexical (BM25) / semantic (embeddings) / graph (k-hop) / community

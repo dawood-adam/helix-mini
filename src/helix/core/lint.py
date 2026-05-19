@@ -1,9 +1,9 @@
-"""Atlas hygiene (HELIX-v3 §3.4 communities, §7.7 lint).
+"""Atlas hygiene — communities + lint.
 
-Communities = label propagation over the 3c SQLite graph (dep-light, not
-Leiden — milliseconds for <1000 pages per v3 §11.1). Lint surfaces six rot
-patterns with suggested fixes; each check is deliberately cheap/exact rather
-than NLP-fuzzy, so the output is trustworthy.
+Communities = label propagation over the SQLite link graph (dep-light, not
+Leiden — milliseconds for <1000 pages). Lint surfaces six rot patterns with
+suggested fixes; each check is deliberately cheap/exact rather than
+NLP-fuzzy, so the output is trustworthy.
 """
 
 from __future__ import annotations
