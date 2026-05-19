@@ -1,6 +1,6 @@
 [project]
 name = "helix"
-version = "0.2.0"
+version = "0.3.0"
 description = "A self-auditing research pipeline with a persistent wiki and git-style snapshots"
 requires-python = ">=3.11"
 dependencies = [

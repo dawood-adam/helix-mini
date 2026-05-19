@@ -1,7 +1,7 @@
 """Pipeline state — data flowing through the six stages.
 
-Adds a generic ``human_feedback`` channel (Risk I): a send-back at any gate
-records a note targeting a stage, and that stage's context builder injects it
+A generic ``human_feedback`` channel: a send-back at any gate records a note
+targeting a stage, and that stage's context builder injects it
 on re-run. Run control (autonomy/directives) is the run-scoped ``Plan``
 (``core.plan``), threaded through the loop — deliberately NOT state here.
 """

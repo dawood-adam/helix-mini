@@ -1,4 +1,4 @@
-"""Page embeddings + body-hash cache (HELIX-v3 §3.3 / semantic recall).
+"""Page embeddings + body-hash cache for semantic recall.
 
 The ONE surviving model dependency. MCP sampling is chat-only (no embeddings
 endpoint — verified against the SDK), so semantic recall needs a *local*
@@ -8,7 +8,7 @@ it semantic mode is simply unavailable and 3e falls back to lexical/graph.
 The cache + invalidation is model-free and fully tested (inject ``embed_fn``);
 the fastembed call is an isolated adapter. Vectors persist in
 ``.helix/embeddings.json`` keyed by page id, invalidated by the sha256 of
-the page body (the ``embeddings.hash`` field 3a reserved). Rebuilding the
+the page body (keyed by the reserved ``embeddings.hash`` field). Rebuilding the
 SQLite graph is cheap so it is derived; embeddings are expensive so they are
 cached.
 """

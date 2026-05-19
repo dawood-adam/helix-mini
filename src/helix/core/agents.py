@@ -2,12 +2,12 @@
 
 Each stage is a markdown file (YAML frontmatter + system-prompt body) in
 ``helix/builtin_agents/``; a project may override any of them with
-``<project>/agents/<stage>.md`` (no code change — Risk B/F).
+``<project>/agents/<stage>.md`` (no code change).
 
 Per-stage *context assembly* and *response mapping* stay in Python because
 they are genuinely data-dependent; the markdown owns the role, the prompt, the
 output contract, and the Atlas-write policy. ``kind: deterministic`` agents
-(validator) dispatch to a registered function and never call an LLM (Risk H).
+(validator) dispatch to a registered function and never call an LLM.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def _all_builtin_agents() -> list[Agent]:
 
 
 def stage_order() -> list[str]:
-    """Pipeline stage order, derived from agent frontmatter (Risk F)."""
+    """Pipeline stage order, derived from agent frontmatter."""
     return [a.name for a in _all_builtin_agents()]
 
 

@@ -3,7 +3,7 @@
 - ``helix.core`` — the dependency-light pipeline (stages, gates, transitions,
   Atlas, snapshots).
 - ``helix.orchestrator`` — the plain loop that runs that core.
-- ``helix.mcp`` — the MCP server that drives it (Phase 1).
+- ``helix.mcp`` — the MCP server that drives it.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -1,12 +1,11 @@
-"""Snapshots v2 — git-style version control for pipeline state.
+"""Snapshots — git-style version control for pipeline state.
 
 A snapshot is a timestamped, stage-stamped, deterministic serialization of
-state. It costs **zero LLM calls**: it reuses the decision/rationale the stage
+state. It costs **zero LLM calls**: it reuses the Decision Card the stage
 already produced as its human digest. Artifact bytes are content-addressed
 (stored once under ``objects/<sha>``) so a snapshot stays a few KB even after
-hundreds of refine cycles (Risk C). Each snapshot records ``parent`` and
-``branch``, so the history is a real DAG that branches, reverts, and resumes
-(Risk D).
+hundreds of refine cycles. Each snapshot records ``parent`` and ``branch``,
+so the history is a real DAG that branches, reverts, and resumes.
 
 Layout: ``<.helix>/snapshots/<project>/`` → ``objects/``, ``<id>.json``,
 ``index.json``.

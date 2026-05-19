@@ -4,7 +4,7 @@
 ``ingest_inbox`` is the frictionless path: drop files in ``atlas/inbox/``,
 a ``.manifest.json`` sha256 delta makes re-runs idempotent, each new file
 becomes a ``type: source`` frontmatter page and its original moves to
-``atlas/raw/`` so the inbox stays a clean drop zone (HELIX-v3 §3.2).
+``atlas/raw/`` so the inbox stays a clean drop zone.
 """
 
 from __future__ import annotations

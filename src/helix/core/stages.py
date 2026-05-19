@@ -22,7 +22,7 @@ class StageResult:
     error: str | None = None
 
     # Legacy projection: the decision log and gate prompts still take plain
-    # strings. 2b reworks those to consume the card directly.
+    # strings; they could consume the card directly in a later cleanup.
     @property
     def decision(self) -> str:
         return self.card.summary

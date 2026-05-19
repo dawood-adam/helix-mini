@@ -1,5 +1,5 @@
 """`helix` CLI — scaffolds a project. The pipeline is driven through the MCP
-server (added in Phase 1), not the CLI. This stays minimal on purpose."""
+server, not the CLI. This stays minimal on purpose."""
 
 from __future__ import annotations
 

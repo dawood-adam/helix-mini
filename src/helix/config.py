@@ -6,8 +6,7 @@ directory live in the project folder unless overridden.
 
 Sampling-only: there is no provider/API-key/model machinery here anymore.
 The MCP client picks the model and holds the credentials. ``ModelConfig`` is
-a vestigial stub kept so the loop/agent signatures stay stable; Phase 1
-removes its last callers.
+a vestigial stub kept only so the loop/agent signatures stay stable.
 """
 
 from __future__ import annotations
@@ -87,8 +86,8 @@ _load_env()
 
 @dataclass
 class ModelConfig:
-    """Vestigial. The MCP client picks the model under sampling; this just
-    keeps loop/agent signatures stable until Phase 1 removes the callers."""
+    """Vestigial. The MCP client picks the model under sampling; this only
+    keeps the loop/agent signatures stable."""
 
     model: str = "sampling"
 
