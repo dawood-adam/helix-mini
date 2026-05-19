@@ -20,7 +20,7 @@ from ..core.snapshots import mint_snapshot
 from ..core.stages import run_stage
 from ..core.state import PipelineState
 from ..core.transitions import END, next_stage, stages
-from ..io import Declined
+from ..io import ClientUnavailable, Declined
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +165,16 @@ def _run(
             # the cost-ceiling pause.
             state.next_action = "paused-input"
             log.info("Paused (user declined elicitation) — resumable")
+            return state
+        except ClientUnavailable as e:
+            # The seam died at the gate (after the stage's snapshot was
+            # minted). Backstop for the stage-path conversion in run_stage:
+            # represent it like a stage error so it reports legibly and the
+            # existing stage snapshot makes it resumable — never an opaque
+            # crash that loses the run.
+            state.error = str(e)
+            state.current_stage = "error"
+            log.warning("Stopped (MCP client unavailable) — resumable")
             return state
         if nxt is None:
             return state

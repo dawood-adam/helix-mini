@@ -33,7 +33,16 @@ class StageResult:
 
 
 def run_stage(stage: str, state: PipelineState, ctx: AgentCtx) -> StageResult:
-    updates, tokens, card = run_agent(stage, state, ctx)
+    from ..io import ClientUnavailable
+
+    try:
+        updates, tokens, card = run_agent(stage, state, ctx)
+    except ClientUnavailable as e:
+        # The model/elicitation seam went away mid-stage. Treat it exactly
+        # like an agent input error: a clean StageResult.error, so advance
+        # snapshots it and the run stops resumably instead of the exception
+        # crashing the tool and losing the whole run.
+        return StageResult(updates={}, tokens=0, error=str(e))
     if updates.get("error"):
         return StageResult(updates={}, tokens=tokens, error=updates["error"])
     return StageResult(updates=updates, tokens=tokens, card=card)

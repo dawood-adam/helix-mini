@@ -315,13 +315,60 @@ def helix_resume(project: str = "") -> str:
 # --- Gated tools: drive the full pipeline through the client ----------------
 
 
-async def _drive(ctx: Context, fn, *args) -> str:
+def _missing_client_caps(ctx: Context, needs: tuple[str, ...]) -> str | None:
+    """Return an actionable error if the connected client can't service the
+    server→client callbacks a gated tool needs, else ``None``.
+
+    Helix drives the model via MCP *sampling* and asks the human at gates via
+    *elicitation*. A client that advertises neither (or a stale / standalone
+    ``helix mcp`` process with no interactive client attached) makes the very
+    first callback fail with a raw protocol error ("Method not found" /
+    "Sampling not supported") *after* a run has already been registered. We
+    check up front instead, so the failure is legible and nothing is started.
+    """
+    from mcp.types import (
+        ClientCapabilities,
+        ElicitationCapability,
+        SamplingCapability,
+    )
+
+    probes = {
+        "sampling": ClientCapabilities(sampling=SamplingCapability()),
+        "elicitation": ClientCapabilities(elicitation=ElicitationCapability()),
+    }
+    missing = [
+        n for n in needs
+        if not ctx.session.check_client_capability(probes[n])
+    ]
+    if not missing:
+        return None
+    return (
+        "Error: this MCP client cannot run the Helix pipeline — it does not "
+        f"support MCP {' + '.join(missing)}. Helix drives the model through "
+        "sampling and asks you at each gate through elicitation, so the "
+        "client that launched the helix MCP server must provide both. Make "
+        "sure the server is connected to an interactive client (e.g. Claude "
+        "Code) and not a stale or standalone `helix mcp` process, then try "
+        "again. No run was started; nothing was lost."
+    )
+
+
+async def _drive(
+    ctx: Context, fn, *args, needs: tuple[str, ...] = ("sampling", "elicitation")
+) -> str:
     """Run a blocking pipeline call in a worker thread with the standardized
-    client IO bound, so sampling + elicitation both route back to ``ctx``."""
+    client IO bound, so sampling + elicitation both route back to ``ctx``.
+
+    Pre-flights ``needs`` so a client lacking those callbacks fails fast with
+    guidance rather than mid-run with an opaque error."""
     import anyio
 
     from ..io import use
     from .client_io import McpClientIO
+
+    gap = _missing_client_caps(ctx, needs)
+    if gap:
+        return gap
 
     io = McpClientIO(ctx)
 
@@ -353,38 +400,48 @@ def _run_blocking(io, folder: str, question: str, autonomy_until: str) -> str:
     fp = Path(folder).expanduser()
     if not fp.is_dir():
         return f"Error: not a directory: {folder}"
-    plan = Plan.from_autonomy_until(autonomy_until)
-    run_id = runs.start_run(fp.stem, plan)
-    r = app.run(
-        fp.resolve(), model_config=ModelConfig(),
-        research_question=question, plan=plan,
-        ask=gate_asker(io), interactive=True,
-        progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-    )
-    runs.finish_run(run_id, r)
-    return f"[{run_id}] " + _summary(r)
+    # The run is self-rooted at its source folder: atlas, snapshots, runs and
+    # hot all live under fp, independent of the server process's launch cwd.
+    with config.use_root(fp.resolve()):
+        plan = Plan.from_autonomy_until(autonomy_until)
+        run_id = runs.start_run(fp.stem, plan)
+        r = app.run(
+            fp.resolve(), model_config=ModelConfig(),
+            research_question=question, plan=plan,
+            ask=gate_asker(io), interactive=True,
+            progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
+        )
+        runs.finish_run(run_id, r)
+        return f"[{run_id}] " + _summary(r)
 
 
-def _resume_blocking(io, project: str, snapshot: str, at: str, branch: str) -> str:
+def _resume_blocking(
+    io, project: str, snapshot: str, at: str, branch: str, folder: str
+) -> str:
     from .. import app, runs
     from ..config import ModelConfig
     from ..core.plan import Plan
     from ..io import gate_asker
 
-    plan = Plan.from_autonomy_until("")
-    run_id = runs.start_run(project, plan)
-    try:
-        r = app.resume(
-            project, snapshot, model_config=ModelConfig(),
-            start_at=at or None, branch=branch, plan=plan,
-            ask=gate_asker(io), interactive=True,
-            progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-        )
-    except ValueError as e:
-        runs.abort_run(run_id, str(e))
-        return f"Error: {e}"
-    runs.finish_run(run_id, r)
-    return f"[{run_id}] " + _summary(r)
+    # Pass the project folder to resume against the same self-rooted store
+    # the run wrote to. Omitted = fall back to HELIX_HOME / cwd (correct when
+    # the server is already rooted at the project, e.g. a per-project
+    # .mcp.json).
+    with config.use_root(Path(folder).expanduser() if folder.strip() else None):
+        plan = Plan.from_autonomy_until("")
+        run_id = runs.start_run(project, plan)
+        try:
+            r = app.resume(
+                project, snapshot, model_config=ModelConfig(),
+                start_at=at or None, branch=branch, plan=plan,
+                ask=gate_asker(io), interactive=True,
+                progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
+            )
+        except ValueError as e:
+            runs.abort_run(run_id, str(e))
+            return f"Error: {e}"
+        runs.finish_run(run_id, r)
+        return f"[{run_id}] " + _summary(r)
 
 
 def _start_wizard(io, folder: str) -> str:
@@ -450,16 +507,19 @@ def _start_wizard(io, folder: str) -> str:
             '"start helix" again. No run was started; nothing was lost.'
         )
 
-    plan = Plan.from_autonomy_until(autonomy_until)
-    run_id = runs.start_run(name, plan)
-    r = app.run(
-        fp.resolve(), model_config=ModelConfig(), project_name=name,
-        research_question=description, plan=plan,
-        ask=gate_asker(io), interactive=True,
-        progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-    )
-    runs.finish_run(run_id, r)
-    return f"[{run_id}] started '{name}' ({choice}) — " + _summary(r)
+    # Same self-rooting as run_pipeline: the run lives under its source
+    # folder, not the server's launch cwd.
+    with config.use_root(fp.resolve()):
+        plan = Plan.from_autonomy_until(autonomy_until)
+        run_id = runs.start_run(name, plan)
+        r = app.run(
+            fp.resolve(), model_config=ModelConfig(), project_name=name,
+            research_question=description, plan=plan,
+            ask=gate_asker(io), interactive=True,
+            progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
+        )
+        runs.finish_run(run_id, r)
+        return f"[{run_id}] started '{name}' ({choice}) — " + _summary(r)
 
 
 @mcp.tool()
@@ -474,10 +534,15 @@ async def run_pipeline(
 
 @mcp.tool()
 async def resume_pipeline(
-    project: str, snapshot: str, ctx: Context, at: str = "", branch: str = "main"
+    project: str, snapshot: str, ctx: Context, at: str = "",
+    branch: str = "main", folder: str = "",
 ) -> str:
-    """Resume a project from a snapshot, re-entering at any stage. Gated."""
-    return await _drive(ctx, _resume_blocking, project, snapshot, at, branch)
+    """Resume a project from a snapshot, re-entering at any stage. Pass
+    ``folder`` (the project's source folder) to resume against the same
+    self-rooted store the run wrote to, regardless of the server's cwd.
+    Gated."""
+    return await _drive(
+        ctx, _resume_blocking, project, snapshot, at, branch, folder)
 
 
 @mcp.tool()
@@ -485,7 +550,11 @@ async def hx_start(ctx: Context, folder: str = "") -> str:
     """Guided project setup: elicits name / description / control mode (and
     the source folder if not given), builds the Plan, then runs the pipeline.
     Gated — the host confirms before this runs."""
-    return await _drive(ctx, _start_wizard, folder)
+    # The wizard always elicits first and may legitimately return before ever
+    # sampling (cancelled, or empty source folder), so only elicitation is
+    # required up front; a missing model callback on the eventual run is
+    # surfaced by client_io's defensive translation.
+    return await _drive(ctx, _start_wizard, folder, needs=("elicitation",))
 
 
 def _promote_blocking(io, ids: str, tier: str) -> str:
@@ -520,7 +589,10 @@ def _promote_blocking(io, ids: str, tier: str) -> str:
 async def hx_atlas_promote(ids: str, tier: str, ctx: Context) -> str:
     """Bump page tier(s) (comma/space-separated ids or paths). Promoting to
     canonical/published asks you to confirm first (elicitation)."""
-    return await _drive(ctx, _promote_blocking, ids, tier)
+    # Elicitation here is conditional (only canonical/published) and there is
+    # no sampling, so skip the blanket pre-flight; the confirm path is
+    # covered by client_io's defensive translation.
+    return await _drive(ctx, _promote_blocking, ids, tier, needs=())
 
 
 @mcp.tool()
