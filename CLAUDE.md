@@ -29,12 +29,15 @@ one **drive surface** (the MCP server). See
   `atlas.py` (frontmatter store + the canonical `iter_pages`),
   `atlas_index.py` (SQLite graph), `embed.py`, `recall.py`, `lint.py`,
   `ingest.py`, `hot.py`.
-- **`helix/orchestrator/loop.py`** — the only runner; owns `advance`, the
-  per-stage unit (run → snapshot → gate → transition).
-- **`helix/`** — `io.py` (the standardized client-IO seam: sampling +
-  elicitation), `llm.py` (chokepoint → sampling), `config.py` (paths +
-  limits), `sandbox.py`, `runs.py` (the bounded run registry), `app.py`
-  (facade), `agent_iface.py` (pure tool bodies), `cli.py` (init + mcp).
+- **`helix/orchestrator/loop.py`** — the only runner; owns `advance` (the
+  per-stage unit: run → snapshot → gate → transition) and the agent-driven
+  step driver (`step_begin`/`submit_stage`/`resume_step` reuse `advance`).
+- **`helix/`** — `io.py` (the client-IO seam: elicitation; the model is the
+  client *agent*, not a callback), `llm.py` (chokepoint → the bound JSON
+  responder; no sampling), `config.py` (paths + limits + per-run
+  `use_root`), `sandbox.py`, `runs.py` (bounded run registry + pending
+  step), `app.py` (in-process harness facade), `agent_iface.py` (pure tool
+  bodies), `cli.py` (init + mcp).
 - **`helix/mcp/`** — `server.py` (FastMCP: tools, resources, prompts),
   `client_io.py` (the MCP-backed `ClientIO`). The only modules that import
   the `mcp` SDK.
@@ -49,8 +52,12 @@ one **drive surface** (the MCP server). See
   routing logic there, never in the orchestrator.
 - A snapshot never calls an LLM. `mint_snapshot` serializes and
   content-addresses; it stores the stage's Decision Card as the digest.
-- The model is driven only via the client (MCP sampling). `llm.call_llm`
-  resolves the bound `ClientIO` from `helix.io`; nothing holds API keys.
+- The model is driven only by the client *agent*, through the tool loop.
+  `hx_step` renders a stage's prompt (the bound JSON responder raises
+  `io.NeedsModel`, suspending before any mutation); `hx_submit` re-enters
+  the *same* `advance` from the prior snapshot with the agent's answer
+  injected. No server-side sampling; nothing holds API keys. The responder
+  is threaded via a contextvar (`llm.use_responder`), never on state.
 - Run control is the run-scoped `Plan` (`core.plan`), threaded like
   `ask`/`interactive` — never a `PipelineState` field. `autonomy_until` is a
   compat constructor.
@@ -66,12 +73,14 @@ one **drive surface** (the MCP server). See
 
 ## Test patterns
 
-- `tests/conftest.py` isolates `HELIX_HOME` to a tmp dir and patches
-  `helix.core.agents.call_llm_json` (the patch point above `call_llm`),
-  routing fake JSON by system-prompt keyword.
-- MCP behaviour is exercised end to end with
-  `mcp.shared.memory.create_connected_server_and_client_session`, supplying
-  fake `sampling`/`elicitation` callbacks.
+- `tests/conftest.py` isolates the project (`HELIX_HOME` == the source
+  folder, the one-folder-per-workspace model) and patches
+  `helix.core.agents.call_llm_json`, routing fake JSON by system-prompt
+  keyword — the in-process `app.run` harness for core behaviour.
+- The MCP drive surface is exercised end to end with
+  `mcp.shared.memory.create_connected_server_and_client_session` and an
+  `elicitation_callback` only (no sampling): drive `hx_step` → feed the
+  stage's JSON → `hx_submit`, looping to the done summary.
 - Optional-dependency paths (`mcp`, `fastembed`) are guarded with
   `pytest.importorskip`; the surrounding logic is tested model-free via
   injected functions.

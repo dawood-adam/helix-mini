@@ -254,18 +254,28 @@ def helix_ingest() -> str:
 
 @mcp.prompt()
 def helix_run(folder: str = "") -> str:
-    """Start a pipeline run, four control modes."""
-    tgt = f" on {folder}" if folder else ""
+    """Drive the pipeline — you are the model (no MCP sampling)."""
+    tgt = folder or "<project folder>"
     return (
-        f"Run the research pipeline{tgt}:\n"
-        "- Guided: call hx_start — it elicits name / description / control "
-        "mode, then runs.\n"
-        "- Direct: run_pipeline(folder, autonomy_until=''). '' = pause and "
-        "ask at every gate (elicitation); a stage name = auto until there; "
-        "'END' = fully autonomous.\n"
-        "- Mid-run: steer with hx_run_plan_set; observe with hx_run_status / "
-        "hx_run_events. Each stage emits a Decision Card + a snapshot; a "
-        "declined gate pauses resumably."
+        "Run the research pipeline. Helix has no model of its own — YOU "
+        "(this agent) are the intelligence for every stage, via the tool "
+        "loop:\n\n"
+        f"1. hx_step(folder={tgt!r}) — initializes the run (reads "
+        "question.md) and returns the FIRST stage's SYSTEM + USER prompt, "
+        "plus a stage name and pending_token. Or hx_start for the guided "
+        "wizard.\n"
+        "2. Read that prompt and reason as if you were that agent. Produce "
+        "ONLY the JSON its output contract specifies.\n"
+        "3. hx_submit(folder, stage, result_json=<your JSON>, "
+        "pending_token) — Helix maps it, writes the Atlas, snapshots, runs "
+        "the gate, and returns the NEXT stage's prompt (deterministic "
+        "stages run server-side; you won't see them).\n"
+        "4. Repeat 2–3 until the reply is a run summary instead of another "
+        "'NEEDS MODEL' prompt.\n\n"
+        "Gates: by default each gate asks you via elicitation; pass "
+        "autonomy_until (a stage name or 'END') to auto-proceed. Observe "
+        "with hx_run_status / hx_run_events; every stage is snapshotted and "
+        "resumable. If interrupted, just call hx_step(folder) again."
     )
 
 
@@ -319,21 +329,16 @@ def _missing_client_caps(ctx: Context, needs: tuple[str, ...]) -> str | None:
     """Return an actionable error if the connected client can't service the
     server→client callbacks a gated tool needs, else ``None``.
 
-    Helix drives the model via MCP *sampling* and asks the human at gates via
-    *elicitation*. A client that advertises neither (or a stale / standalone
-    ``helix mcp`` process with no interactive client attached) makes the very
-    first callback fail with a raw protocol error ("Method not found" /
-    "Sampling not supported") *after* a run has already been registered. We
-    check up front instead, so the failure is legible and nothing is started.
+    Helix is agent-driven (no sampling); the only callback is *elicitation*
+    (gates / confirmations). A client that doesn't advertise it (or a stale
+    / standalone ``helix mcp`` process with no interactive client attached)
+    would fail the first gate with a raw protocol error after a run had
+    already been registered. We check up front so the failure is legible and
+    nothing is started.
     """
-    from mcp.types import (
-        ClientCapabilities,
-        ElicitationCapability,
-        SamplingCapability,
-    )
+    from mcp.types import ClientCapabilities, ElicitationCapability
 
     probes = {
-        "sampling": ClientCapabilities(sampling=SamplingCapability()),
         "elicitation": ClientCapabilities(elicitation=ElicitationCapability()),
     }
     missing = [
@@ -344,22 +349,22 @@ def _missing_client_caps(ctx: Context, needs: tuple[str, ...]) -> str | None:
         return None
     return (
         "Error: this MCP client cannot run the Helix pipeline — it does not "
-        f"support MCP {' + '.join(missing)}. Helix drives the model through "
-        "sampling and asks you at each gate through elicitation, so the "
-        "client that launched the helix MCP server must provide both. Make "
-        "sure the server is connected to an interactive client (e.g. Claude "
-        "Code) and not a stale or standalone `helix mcp` process, then try "
-        "again. No run was started; nothing was lost."
+        f"support MCP {' + '.join(missing)}. Helix asks you at each gate "
+        "through elicitation, so the client that launched the helix MCP "
+        "server must provide it. Make sure the server is connected to an "
+        "interactive client (e.g. Claude Code) and not a stale or standalone "
+        "`helix mcp` process, then try again. No run was started; nothing "
+        "was lost."
     )
 
 
 async def _drive(
-    ctx: Context, fn, *args, needs: tuple[str, ...] = ("sampling", "elicitation")
+    ctx: Context, fn, *args, needs: tuple[str, ...] = ("elicitation",)
 ) -> str:
-    """Run a blocking pipeline call in a worker thread with the standardized
-    client IO bound, so sampling + elicitation both route back to ``ctx``.
+    """Run a blocking pipeline call in a worker thread with the client IO
+    bound, so gate elicitation routes back to ``ctx``.
 
-    Pre-flights ``needs`` so a client lacking those callbacks fails fast with
+    Pre-flights ``needs`` so a client lacking elicitation fails fast with
     guidance rather than mid-run with an opaque error."""
     import anyio
 
@@ -391,65 +396,163 @@ def _summary(r) -> str:
     return out
 
 
-def _run_blocking(io, folder: str, question: str, autonomy_until: str) -> str:
-    from .. import app, runs
-    from ..config import ModelConfig
+
+
+# --- Agent-driven drive surface (no sampling: the client agent is the model)
+
+def _step_payload(folder: str, project: str, o, token: str) -> str:
+    return (
+        f"NEEDS MODEL — project '{project}', stage '{o.stage}'.\n"
+        "You are the model for this stage. Read SYSTEM + USER below, then "
+        "reply with ONLY the JSON the stage's output contract requires, via:\n"
+        f"  hx_submit(folder={folder!r}, stage={o.stage!r}, "
+        f"result_json=<your JSON>, pending_token={token!r})\n"
+        f"\n----- SYSTEM -----\n{o.system}\n----- USER -----\n{o.user}"
+    )
+
+
+def _handle_outcome(folder, project, run_id, o, branch, autonomy="") -> str:
+    from .. import runs
+
+    if o.kind == "needs_model":
+        import secrets
+
+        token = secrets.token_hex(4)
+        runs.set_pending(project, {
+            "run_id": run_id, "stage": o.stage, "resume_from": o.last_id,
+            "branch": branch, "system": o.system, "user": o.user,
+            "token": token, "autonomy": autonomy,
+        })
+        runs.record_event(run_id, o.stage, o.state.tokens_used, kind="await")
+        return _step_payload(folder, project, o, token)
+    runs.clear_pending(project)
+    runs.finish_run(run_id, o.state)
+    tail = ("" if o.kind == "done"
+            else "\n  (resumable — call hx_step to continue)")
+    return f"[{run_id}] " + _summary(o.state) + tail
+
+
+def _step_blocking(
+    io, folder: str, question: str, autonomy_until: str = "",
+    project_name: str = "",
+) -> str:
+    from .. import runs
+    from ..config import ModelConfig, atlas_path, token_cap
+    from ..core.atlas import Atlas
     from ..core.plan import Plan
+    from ..core.snapshots import mint_snapshot
+    from ..core.state import PipelineState
     from ..io import gate_asker
+    from ..orchestrator import loop
 
     fp = Path(folder).expanduser()
     if not fp.is_dir():
         return f"Error: not a directory: {folder}"
-    # The run is self-rooted at its source folder: atlas, snapshots, runs and
-    # hot all live under fp, independent of the server process's launch cwd.
     with config.use_root(fp.resolve()):
+        project = project_name.strip() or fp.stem
+        pend = runs.get_pending(project)
+        if pend:  # idempotent: re-show the outstanding step
+            o = loop.StepOutcome(
+                "needs_model", None, pend["resume_from"],
+                stage=pend["stage"], system=pend["system"], user=pend["user"])
+            return _step_payload(folder, project, o, pend["token"])
+
+        q = question.strip()
+        if not q and (fp / "question.md").is_file():
+            q = (fp / "question.md").read_text().strip()
         plan = Plan.from_autonomy_until(autonomy_until)
-        run_id = runs.start_run(fp.stem, plan)
-        r = app.run(
-            fp.resolve(), model_config=ModelConfig(),
-            research_question=question, plan=plan,
-            ask=gate_asker(io), interactive=True,
-            progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-        )
-        runs.finish_run(run_id, r)
-        return f"[{run_id}] " + _summary(r)
+        state = PipelineState(
+            project_name=project, research_question=q,
+            input_folder=str(fp.resolve()),
+            token_cap=token_cap(), call_cap=ModelConfig().call_cap())
+        run_id = runs.start_run(project, plan)
+        init = mint_snapshot(
+            state, project, stage="start",
+            report={"decision": "initialized", "rationale": q or "-"},
+            parent=None, branch="main")
+        o = loop.step_begin(
+            state, Atlas(atlas_path()), ModelConfig(),
+            last_id=init["id"], ask=gate_asker(io), plan=plan, branch="main")
+        return _handle_outcome(folder, project, run_id, o, "main",
+                               autonomy=autonomy_until)
+
+
+def _submit_blocking(
+    io, folder: str, stage: str, result_json: str, pending_token: str
+) -> str:
+    from .. import runs
+    from ..config import ModelConfig, atlas_path
+    from ..core.atlas import Atlas
+    from ..core.plan import Plan
+    from ..io import gate_asker
+    from ..orchestrator import loop
+
+    fp = Path(folder).expanduser()
+    if not fp.is_dir():
+        return f"Error: not a directory: {folder}"
+    with config.use_root(fp.resolve()):
+        project = fp.stem
+        pend = runs.get_pending(project)
+        if pend is None:
+            return (f"No pending step for '{project}'. Call hx_step(folder) "
+                    "to (re)start or continue the pipeline.")
+        if pending_token != pend["token"]:
+            return ("Stale pending_token — the run moved on or restarted. "
+                    "Call hx_step(folder) to get the current step.")
+        if stage != pend["stage"]:
+            return (f"Wrong stage: the pending step is '{pend['stage']}', "
+                    f"not '{stage}'. Submit that one.")
+        autonomy = pend.get("autonomy", "")
+        try:
+            o = loop.submit_stage(
+                project, pend["resume_from"], stage, result_json,
+                Atlas(atlas_path()), ModelConfig(),
+                ask=gate_asker(io), plan=Plan.from_autonomy_until(autonomy),
+                branch=pend["branch"])
+        except ValueError as e:
+            return f"Error: {e}"
+        return _handle_outcome(folder, project, pend["run_id"], o,
+                               pend["branch"], autonomy=autonomy)
 
 
 def _resume_blocking(
     io, project: str, snapshot: str, at: str, branch: str, folder: str
 ) -> str:
-    from .. import app, runs
-    from ..config import ModelConfig
+    from .. import runs
+    from ..config import ModelConfig, atlas_path
+    from ..core.atlas import Atlas
     from ..core.plan import Plan
+    from ..core.snapshots import load_snapshot
     from ..io import gate_asker
+    from ..orchestrator import loop
 
     # Pass the project folder to resume against the same self-rooted store
     # the run wrote to. Omitted = fall back to HELIX_HOME / cwd (correct when
     # the server is already rooted at the project, e.g. a per-project
     # .mcp.json).
     with config.use_root(Path(folder).expanduser() if folder.strip() else None):
-        plan = Plan.from_autonomy_until("")
-        run_id = runs.start_run(project, plan)
+        snap = load_snapshot(project, snapshot)
+        if snap is None:
+            return f"Error: no snapshot {snapshot} for project '{project}'"
+        start_at = at or snap.get("stage") or "scout"
+        if start_at == "start":
+            start_at = "scout"
+        run_id = runs.start_run(project, Plan.from_autonomy_until(""))
         try:
-            r = app.resume(
-                project, snapshot, model_config=ModelConfig(),
-                start_at=at or None, branch=branch, plan=plan,
-                ask=gate_asker(io), interactive=True,
-                progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-            )
+            o = loop.resume_step(
+                project, str(snapshot), start_at,
+                Atlas(atlas_path()), ModelConfig(),
+                ask=gate_asker(io), plan=Plan.from_autonomy_until(""),
+                branch=branch)
         except ValueError as e:
             runs.abort_run(run_id, str(e))
             return f"Error: {e}"
-        runs.finish_run(run_id, r)
-        return f"[{run_id}] " + _summary(r)
+        return _handle_outcome(folder or project, project, run_id, o, branch)
 
 
 def _start_wizard(io, folder: str) -> str:
-    from .. import app, runs
-    from ..config import ModelConfig
-    from ..core.plan import Plan
     from ..core.transitions import stages
-    from ..io import ask_choice, ask_text, gate_asker
+    from ..io import ask_choice, ask_text
 
     def _ask(req):
         r = io.elicit(req)
@@ -507,29 +610,54 @@ def _start_wizard(io, folder: str) -> str:
             '"start helix" again. No run was started; nothing was lost.'
         )
 
-    # Same self-rooting as run_pipeline: the run lives under its source
-    # folder, not the server's launch cwd.
-    with config.use_root(fp.resolve()):
-        plan = Plan.from_autonomy_until(autonomy_until)
-        run_id = runs.start_run(name, plan)
-        r = app.run(
-            fp.resolve(), model_config=ModelConfig(), project_name=name,
-            research_question=description, plan=plan,
-            ask=gate_asker(io), interactive=True,
-            progress_fn=lambda s, p, t: runs.record_event(run_id, s, t),
-        )
-        runs.finish_run(run_id, r)
-        return f"[{run_id}] started '{name}' ({choice}) — " + _summary(r)
+    # Hand off to the agent-driven initializer: it self-roots at fp, creates
+    # the run, and returns the first stage's prompt for the client agent.
+    return (f"Started '{name}' ({choice}).\n\n"
+            + _step_blocking(io, str(fp), description, autonomy_until,
+                             project_name=name))
 
 
 @mcp.tool()
 async def run_pipeline(
     folder: str, ctx: Context, question: str = "", autonomy_until: str = ""
 ) -> str:
-    """Run the pipeline on a folder. Default: pause at every gate and ask you
-    (via elicitation). Set autonomy_until to a stage name, or "END", to
-    auto-proceed. Gated — the host confirms before this runs."""
-    return await _drive(ctx, _run_blocking, folder, question, autonomy_until)
+    """Start a pipeline run on a folder and return the first stage's prompt
+    for YOU (the client agent) to answer — Helix is driven through the tool
+    loop, not server-side sampling. Equivalent to hx_step on a fresh run.
+    ``autonomy_until`` (a stage name or "END") auto-proceeds gates instead of
+    eliciting. Continue with hx_submit / hx_step."""
+    return await _drive(
+        ctx, _step_blocking, folder, question, autonomy_until,
+        needs=("elicitation",))
+
+
+@mcp.tool()
+async def hx_step(
+    ctx: Context, folder: str, question: str = "", autonomy_until: str = ""
+) -> str:
+    """Advance the pipeline for ``folder`` to the next point that needs the
+    model, and return that stage's SYSTEM + USER prompt for YOU (the client
+    agent) to answer. First call initializes the run (reads question.md if
+    ``question`` is empty). Deterministic stages run server-side with no
+    round-trip; ``autonomy_until`` auto-proceeds gates. When the run finishes
+    it says so. No sampling — you are the model: produce the JSON and call
+    hx_submit."""
+    return await _drive(
+        ctx, _step_blocking, folder, question, autonomy_until,
+        needs=("elicitation",))
+
+
+@mcp.tool()
+async def hx_submit(
+    ctx: Context, folder: str, stage: str, result_json: str,
+    pending_token: str,
+) -> str:
+    """Submit your JSON answer for the pending stage. Helix maps it, writes
+    the Atlas, snapshots, runs the gate, transitions, and returns the next
+    hx_step prompt (or the final summary). Guarded by ``pending_token``."""
+    return await _drive(
+        ctx, _submit_blocking, folder, stage, result_json, pending_token,
+        needs=("elicitation",))
 
 
 @mcp.tool()
@@ -548,12 +676,8 @@ async def resume_pipeline(
 @mcp.tool()
 async def hx_start(ctx: Context, folder: str = "") -> str:
     """Guided project setup: elicits name / description / control mode (and
-    the source folder if not given), builds the Plan, then runs the pipeline.
-    Gated — the host confirms before this runs."""
-    # The wizard always elicits first and may legitimately return before ever
-    # sampling (cancelled, or empty source folder), so only elicitation is
-    # required up front; a missing model callback on the eventual run is
-    # surfaced by client_io's defensive translation.
+    the source folder if not given), then starts the run and returns the
+    first stage's prompt for you to answer (agent-driven; no sampling)."""
     return await _drive(ctx, _start_wizard, folder, needs=("elicitation",))
 
 

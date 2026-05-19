@@ -4,6 +4,14 @@ A re-architecture around the Model Context Protocol, simplifying the system
 while implementing the HELIX-v3 design (Forge, Atlas, Snapshots). A clean
 break: no migration of old data or snapshots.
 
+> **Historical record.** This documents the v3 refactor. One decision below
+> was later reversed: the **"Sampling-only"** model. Claude Code does not
+> implement MCP sampling, so Helix is now **agent-driven** — the client
+> agent answers each stage through the `hx_step` / `hx_submit` tool loop and
+> the sampling path was removed. Read
+> [docs/agent-driven-pipeline.md](docs/agent-driven-pipeline.md) for the
+> current model; treat the sampling references below as superseded.
+
 ## What changed
 
 **One drive surface.** The CLI, the LangGraph orchestrator, and the

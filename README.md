@@ -5,9 +5,11 @@ material into validated, contextualized code through a six-stage pipeline,
 maintains a persistent research wiki that compounds across projects, and keeps
 a git-style snapshot history of every step.
 
-You drive it by talking to an MCP client such as Claude Code. Helix holds no
-model credentials: every model call is delegated back to the client through
-MCP sampling, so there are no API keys to configure.
+You drive it by talking to an MCP client such as Claude Code. Helix has no
+model of its own and holds no credentials: the client agent *is* the model.
+Each stage hands its prompt back to the agent through the tool loop
+(`hx_step` / `hx_submit`), so there are no API keys and no sampling to
+configure. See [docs/agent-driven-pipeline.md](docs/agent-driven-pipeline.md).
 
 Three components behind one MCP server:
 
@@ -26,7 +28,8 @@ Three components behind one MCP server:
 ## Requirements
 
 - Python ≥ 3.11
-- An MCP client that supports sampling and elicitation (Claude Code)
+- An MCP client whose agent drives the loop and supports elicitation
+  (Claude Code)
 
 ## Quick start
 
@@ -60,7 +63,8 @@ Work in plain language. Claude Code calls Helix's MCP tools for you.
 ```text
 start helix
     Runs the hx_start wizard: it asks for a project name, the research
-    question, a control mode, and the source folder, then starts the run.
+    question, a control mode, and the source folder, then hands the first
+    stage to the agent. Claude Code answers each stage and advances the run.
 
 [drop a PDF into atlas/inbox/]  process my inbox
     Ingests the file as a typed source page and moves the original to
@@ -87,6 +91,7 @@ run automatically up to a chosen stage, or fully unattended.
 | Document | Contents |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | The system and its layers |
+| [docs/agent-driven-pipeline.md](docs/agent-driven-pipeline.md) | How the agent drives the pipeline (no sampling) |
 | [docs/usage.md](docs/usage.md) | Driving Helix end to end |
 | [docs/mcp.md](docs/mcp.md) | The MCP surface: tools, resources, prompts |
 | [docs/forge.md](docs/forge.md) | The pipeline |

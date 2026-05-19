@@ -7,7 +7,9 @@ token/call ceiling that *pauses* (resumable) instead of failing.
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import ModelConfig, atlas_path, project_root
@@ -16,11 +18,12 @@ from ..core.atlas import Atlas
 from ..core.decisions import append_decision, save_decisions_md
 from ..core.gates import decide_gate, record_feedback
 from ..core.plan import Plan
-from ..core.snapshots import mint_snapshot
+from ..core.snapshots import mint_snapshot, resume_state
 from ..core.stages import run_stage
 from ..core.state import PipelineState
 from ..core.transitions import END, next_stage, stages
-from ..io import ClientUnavailable, Declined
+from ..io import ClientUnavailable, Declined, NeedsModel
+from ..llm import parse_json_text, use_responder
 
 log = logging.getLogger(__name__)
 
@@ -264,3 +267,139 @@ def resume_project(
         plan=plan or Plan.from_autonomy_until(autonomy_until),
         progress_fn=progress_fn, branch=branch, parent=str(snapshot_id),
     )
+
+
+# --- Agent-driven stepping --------------------------------------------------
+#
+# Same `advance`, same `next_stage`, same snapshot DAG — only the model
+# acquisition differs. `_advance_loop` runs deterministic stages straight
+# through and *suspends* at the first LLM stage (the render responder raises
+# NeedsModel before any snapshot/Atlas write). The client agent answers; a
+# submit re-enters from the prior snapshot with that answer injected, then
+# the loop continues to the next suspension or END. The autonomous `_run`
+# loop above is untouched.
+
+
+@dataclass
+class StepOutcome:
+    kind: str  # "needs_model" | "done" | "paused" | "error"
+    state: PipelineState
+    last_id: str | None
+    stage: str = ""   # needs_model: the suspended stage
+    system: str = ""  # needs_model: pinned prompt shown to the agent
+    user: str = ""    # needs_model: pinned prompt shown to the agent
+
+
+def _render_responder(stage: str):
+    def _r(model: str, system: str, user: str):
+        raise NeedsModel(stage, system, user)
+    return _r
+
+
+def _inject_responder(answer):
+    def _r(model: str, system: str, user: str):
+        parsed = answer if isinstance(answer, (dict, list)) \
+            else parse_json_text(str(answer))
+        tokens = (len(system) + len(user)
+                  + len(json.dumps(parsed, default=str))) // 4
+        return parsed, int(tokens)
+    return _r
+
+
+def _advance_loop(
+    state: PipelineState, ctx: AgentCtx, atlas: Atlas, current: str,
+    last_id: str | None, *, ask, plan: Plan, branch: str, inject=None,
+) -> StepOutcome:
+    project = state.project_name
+    first = True
+    while current != END:
+        reason = _budget_exceeded(state)
+        if reason:
+            state.next_action = "paused-budget"
+            mint_snapshot(state, project, stage=current,
+                          report={"decision": "paused", "rationale": reason},
+                          parent=last_id, branch=branch)
+            log.warning("Paused (%s) — resumable", reason)
+            return StepOutcome("paused", state, last_id)
+
+        responder = inject if (first and inject is not None) \
+            else _render_responder(current)
+        try:
+            with use_responder(responder):
+                nxt, last_id = advance(
+                    state, ctx, atlas, current, last_id,
+                    ask=ask, interactive=True, plan=plan, branch=branch)
+        except NeedsModel as nm:
+            # Suspended before any mutation: prior snapshot is the resume
+            # point, the pinned prompt goes to the client agent.
+            return StepOutcome("needs_model", state, last_id,
+                               stage=nm.stage, system=nm.system, user=nm.user)
+        except Declined:
+            state.next_action = "paused-input"
+            log.info("Paused (user declined gate) — resumable")
+            return StepOutcome("paused", state, last_id)
+        except ClientUnavailable as e:
+            state.error = str(e)
+            state.current_stage = "error"
+            return StepOutcome("error", state, last_id)
+        first = False
+        if nxt is None:  # advance minted an error/decline snapshot and stopped
+            return StepOutcome(
+                "error" if state.error else "paused", state, last_id)
+        current = nxt
+
+    save_decisions_md(_project_dir(atlas, project),
+                      _decisions_path(atlas, project))
+    return StepOutcome("done", state, last_id)
+
+
+def step_begin(
+    state: PipelineState, atlas: Atlas, model_config: ModelConfig | None,
+    *, last_id: str | None, ask=None, plan: Plan | None = None,
+    branch: str = "main",
+) -> StepOutcome:
+    """Advance a fresh run to its first model suspension (or END)."""
+    ctx = make_ctx(atlas, model_config or ModelConfig())
+    return _advance_loop(
+        state, ctx, atlas, stages()[0], last_id,
+        ask=ask, plan=plan or Plan(), branch=branch)
+
+
+def submit_stage(
+    project: str, resume_from: str, stage: str, answer,
+    atlas: Atlas, model_config: ModelConfig | None,
+    *, ask=None, plan: Plan | None = None, branch: str = "main",
+) -> StepOutcome:
+    """Inject the client agent's answer for ``stage`` (re-entering from the
+    prior snapshot) and advance to the next suspension or END."""
+    state = resume_state(project, resume_from)
+    if state is None:
+        raise ValueError(f"No snapshot {resume_from} for project '{project}'")
+    state.error = None
+    state.next_action = ""
+    ctx = make_ctx(atlas, model_config or ModelConfig())
+    return _advance_loop(
+        state, ctx, atlas, stage, resume_from,
+        ask=ask, plan=plan or Plan(), branch=branch,
+        inject=_inject_responder(answer))
+
+
+def resume_step(
+    project: str, resume_from: str, start_at: str,
+    atlas: Atlas, model_config: ModelConfig | None,
+    *, ask=None, plan: Plan | None = None, branch: str = "main",
+) -> StepOutcome:
+    """Rehydrate ``resume_from`` and advance (no injected answer) to the next
+    model suspension or END — re-entering an existing run at ``start_at``."""
+    state = resume_state(project, resume_from)
+    if state is None:
+        raise ValueError(f"No snapshot {resume_from} for project '{project}'")
+    if start_at not in stages():
+        raise ValueError(
+            f"Unknown stage '{start_at}'. One of: {', '.join(stages())}")
+    state.error = None
+    state.next_action = ""
+    ctx = make_ctx(atlas, model_config or ModelConfig())
+    return _advance_loop(
+        state, ctx, atlas, start_at, resume_from,
+        ask=ask, plan=plan or Plan(), branch=branch)

@@ -12,23 +12,94 @@ import pytest
 from helix.core.gates import GateReport
 from helix.io import (
     Declined, ElicitResult, ask_choice, ask_confirm, ask_multi, ask_text,
-    gate_asker, use,
+    gate_asker,
 )
-from helix.llm import LLMResponse, call_llm
+from helix.llm import call_llm_json
 
 
 class _IO:
-    """Scripted ClientIO: canned model reply + a queue of elicit results."""
+    """Scripted ClientIO: a queue of elicit results (the only callback —
+    Helix is agent-driven, there is no sampling)."""
 
-    def __init__(self, answers=None, reply="ok"):
+    def __init__(self, answers=None):
         self._answers = list(answers or [])
-        self._reply = reply
-
-    def sample(self, *, system, user, max_tokens):
-        return LLMResponse(content=self._reply, usage={}, cost=0.0)
 
     def elicit(self, req):
         return self._answers.pop(0)
+
+
+# --- agent-driven drive helper (the model is the test, via the tool loop) --
+
+_AGENT_ANSWERS = {
+    "scout": {
+        "source_summaries": [{"file": "paper.md", "summary": "cfd"}],
+        "approaches": [
+            {"id": "approach-1", "title": "A1", "description": "d",
+             "feasibility": "high"},
+            {"id": "approach-2", "title": "A2", "description": "d",
+             "feasibility": "low"}],
+        "atlas_writes": [{"path": "sources/paper.md", "title": "Paper",
+                          "content": "c", "summary": "s"}]},
+    "critic_methods": {
+        "critiques": [{"approach_id": "approach-1", "strengths": "x",
+                       "weaknesses": "y", "severity": "info",
+                       "recommendation": "go"}],
+        "recommended_id": "approach-1", "atlas_writes": []},
+    "planner": {
+        "plan": {"title": "Plan", "objective": "o",
+                 "steps": [{"step": 1, "action": "a", "expected_output": "e"}],
+                 "success_criteria": ["c"],
+                 "validation_bands": {"acc": {"min": 0.0, "max": 1.0}}},
+        "atlas_writes": [{"path": "projects/src-papers/plan.md",
+                          "title": "Plan", "content": "c", "summary": "s"}]},
+    "builder": {
+        "artifacts": [{"name": "src/sim.py", "type": "code",
+                       "content": "print('ok')\n", "description": "sim"}],
+        "results": [{"metric": "acc", "value": 0.9, "notes": "ok"}],
+        "atlas_writes": []},
+    "critic_results": {
+        "assessment": "good", "strengths": ["s"], "weaknesses": [],
+        "recommendations": ["r"], "verdict": "ship",
+        "atlas_writes": [{"path": "projects/src-papers/overview.md",
+                          "title": "O", "content": "c", "summary": "s"}]},
+}
+
+
+def _drive_steps(folder, *, max_steps=20):
+    """Drive a fresh run agent-driven with NO sampling: hx_step, then loop
+    hx_submit feeding _AGENT_ANSWERS, gates auto-accepted via elicitation.
+    Returns (final_text, seen_stages)."""
+    import json
+    import re
+
+    import anyio
+    import mcp.types as T
+    from mcp.shared.memory import create_connected_server_and_client_session as conn
+
+    from helix.mcp.server import mcp as server
+
+    async def elicit_cb(context, params):
+        return T.ElicitResult(action="accept", content={"action": "proceed"})
+
+    def _txt(res):
+        return "".join(c.text for c in res.content if c.type == "text")
+
+    async def drive():
+        async with conn(server, elicitation_callback=elicit_cb) as client:
+            await client.initialize()
+            out = _txt(await client.call_tool("hx_step", {"folder": folder}))
+            seen: list[str] = []
+            while out.startswith("NEEDS MODEL") and len(seen) < max_steps:
+                stage = re.search(r"stage '([^']+)'", out).group(1)
+                token = re.search(r"pending_token='([^']+)'", out).group(1)
+                seen.append(stage)
+                out = _txt(await client.call_tool("hx_submit", {
+                    "folder": folder, "stage": stage,
+                    "result_json": json.dumps(_AGENT_ANSWERS[stage]),
+                    "pending_token": token}))
+            return out, seen
+
+    return anyio.run(drive)
 
 
 # --- schema builders --------------------------------------------------------
@@ -44,17 +115,12 @@ def test_builders_emit_flat_compliant_schemas():
     assert ask_text("t", pattern="[a-z]+").schema["properties"]["value"]["pattern"] == "[a-z]+"
 
 
-# --- call_llm rides the bound seam -----------------------------------------
+# --- the model seam: no responder bound -> clear, agent-directed error -----
 
 
-def test_call_llm_uses_bound_io():
-    with use(_IO(reply="hello")):
-        assert call_llm(model="x", system="s", user="u").content == "hello"
-
-
-def test_call_llm_unbound_raises():
-    with pytest.raises(RuntimeError, match="No Helix client IO"):
-        call_llm(model="x", system="s", user="u")
+def test_call_llm_json_without_responder_raises():
+    with pytest.raises(RuntimeError, match="agent-driven|hx_step"):
+        call_llm_json(model="x", system="s", user="u")
 
 
 # --- gate_asker: standardized elicitation -> core HITL decision ------------
@@ -110,73 +176,16 @@ def test_server_constructs():
     assert callable(server.main)
 
 
-def test_end_to_end_in_memory(project):
-    """The only regression guard for client_io.py's sync↔async bridge:
-    drive run_pipeline through a real in-memory MCP client↔server, with the
-    client faking sampling ({}) and auto-proceeding every gate."""
-    pytest.importorskip("mcp")
-    import anyio
-    import mcp.types as T
-    from mcp.shared.memory import create_connected_server_and_client_session as conn
-
-    from helix.core.snapshots import list_snapshots
-    from helix.mcp.server import mcp as server
-
-    async def sampling_cb(context, params):
-        return T.CreateMessageResult(
-            role="assistant",
-            content=T.TextContent(type="text", text="{}"),
-            model="fake", stopReason="endTurn")
-
-    async def elicit_cb(context, params):
-        return T.ElicitResult(action="accept", content={"action": "proceed"})
-
-    def _txt(res):
-        return "".join(c.text for c in res.content if c.type == "text")
-
-    async def drive():
-        async with conn(server, sampling_callback=sampling_cb,
-                        elicitation_callback=elicit_cb) as client:
-            await client.initialize()
-            res = await client.call_tool(
-                "run_pipeline", {"folder": str(project), "question": "BP?"})
-            status = await client.call_tool(
-                "hx_run_status", {"project": project.name})
-            events = await client.call_tool(
-                "hx_run_events", {"project": project.name})
-            return (res.isError, _txt(res), _txt(status), _txt(events))
-
-    is_error, txt, status, events = anyio.run(drive)
-    assert is_error is False, txt
-    assert "done (stages=6" in txt and txt.startswith("[run_")
-    # The bounded run registry recorded the run + its transitions.
-    assert "done" in status and "run_" in status
-    assert "scout" in events and "critic_results" in events
-    snaps = list_snapshots(project.name)
-    assert len(snaps) == 6
-    # Every stage's snapshot carries a Decision Card (here generic, since the
-    # fake client returns {}); proves the card flows the real MCP path.
-    from helix.core.snapshots import load_snapshot
-
-    first = load_snapshot(project.name, snaps[0]["id"])
-    assert first["decision_card"]["summary"] == "scout complete"
-
-
 def _wizard_drive(project, elicit_cb):
+    """hx_start with elicitation only (no sampling — Helix is agent-driven).
+    Returns (isError, text)."""
     import anyio
-    import mcp.types as T
     from mcp.shared.memory import create_connected_server_and_client_session as conn
 
     from helix.mcp.server import mcp as server
 
-    async def sampling_cb(context, params):
-        return T.CreateMessageResult(
-            role="assistant", content=T.TextContent(type="text", text="{}"),
-            model="fake", stopReason="endTurn")
-
     async def drive():
-        async with conn(server, sampling_callback=sampling_cb,
-                        elicitation_callback=elicit_cb) as client:
+        async with conn(server, elicitation_callback=elicit_cb) as client:
             await client.initialize()
             res = await client.call_tool("hx_start", {"folder": str(project)})
             return res.isError, "".join(
@@ -185,12 +194,15 @@ def _wizard_drive(project, elicit_cb):
     return anyio.run(drive)
 
 
-def test_hx_start_wizard_happy_path(project):
+def test_hx_start_wizard_initializes_and_returns_first_step(project):
+    """The wizard elicits name/description/mode, then hands off to the
+    agent-driven loop: it returns the FIRST stage's prompt (no autonomous
+    server run, no sampling)."""
     pytest.importorskip("mcp")
     import mcp.types as T
 
     answers = {"name": "demo-proj", "description": "BP via rPPG",
-               "mode": "fully autonomous", "stage": "scout", "action": "proceed"}
+               "mode": "fully autonomous"}
 
     async def elicit_cb(context, params):
         schema = getattr(params, "requestedSchema", None) or {}
@@ -200,11 +212,12 @@ def test_hx_start_wizard_happy_path(project):
 
     is_error, txt = _wizard_drive(project, elicit_cb)
     assert is_error is False, txt
-    assert txt.startswith("[run_") and "started 'demo-proj'" in txt
-    assert "done (stages=6" in txt
+    assert txt.startswith("Started 'demo-proj'")
+    assert "NEEDS MODEL" in txt and "stage 'scout'" in txt
 
     from helix import runs
-    assert runs.get_record(project="demo-proj").status == "done"
+    assert runs.get_record(project="demo-proj").status == "running"
+    assert runs.get_pending("demo-proj")["stage"] == "scout"
 
 
 def test_hx_start_wizard_cancelled(project):
@@ -339,11 +352,10 @@ def test_hx_start_creates_missing_source_folder(project, tmp_path):
     assert runs.get_record(project="demo-proj") is None
 
 
-def test_gated_tools_fail_fast_without_client_callbacks(project):
-    """A client that advertises neither sampling nor elicitation must get an
-    actionable error *before* any run is registered — not a raw "Method not
-    found" / "Sampling not supported" mid-run. Non-gated tools are
-    unaffected."""
+def test_gated_tools_fail_fast_without_elicitation(project):
+    """A client with no elicitation callback must get an actionable error
+    *before* any run is registered — not a raw "Method not found" at the
+    first gate. Non-gated tools are unaffected."""
     pytest.importorskip("mcp")
     import anyio
     from mcp.shared.memory import create_connected_server_and_client_session as conn
@@ -355,37 +367,36 @@ def test_gated_tools_fail_fast_without_client_callbacks(project):
         return "".join(c.text for c in res.content if c.type == "text")
 
     async def drive():
-        # No sampling_callback / elicitation_callback -> client advertises
-        # neither capability (the exact transcript failure mode).
+        # No elicitation_callback -> client doesn't advertise it.
         async with conn(server) as client:
             await client.initialize()
-            start = await client.call_tool("hx_start", {"folder": str(project)})
+            step = await client.call_tool("hx_step", {"folder": str(project)})
             run = await client.call_tool(
                 "run_pipeline", {"folder": str(project), "question": "BP?"})
             status = await client.call_tool("atlas_status", {})
-            return _txt(start), _txt(run), _txt(status)
+            return _txt(step), _txt(run), _txt(status)
 
-    start, run, status = anyio.run(drive)
+    step, run, status = anyio.run(drive)
 
-    for msg in (start, run):
+    for msg in (step, run):
         assert msg.startswith("Error: this MCP client cannot run")
+        assert "does not support MCP elicitation." in msg
         assert "No run was started" in msg
-    # hx_start elicits first (only elicitation pre-flighted); run_pipeline
-    # samples immediately (both pre-flighted).
-    assert "does not support MCP elicitation." in start
-    assert "does not support MCP sampling + elicitation." in run
     # Pre-flight ran before any run was registered.
     assert runs.get_record(project=project.stem) is None
-    # Non-gated tools still work — only the callback-needing ones gate.
+    # Non-gated tools still work — only the elicitation-needing ones gate.
     assert not status.startswith("Error:") and "Atlas" in status
 
 
-def test_midrun_sampling_failure_is_resumable_not_a_crash(project):
-    """Pre-flight passes (both caps advertised) but the client then refuses
-    the sampling callback mid-run ("Method not found", the real transcript
-    symptom). It must become a legible, snapshotted, resumable stop — not an
-    uncaught exception that crashes the tool and loses the whole run."""
+def test_midrun_elicitation_refusal_is_resumable_not_a_crash(project):
+    """The client serviced hx_step/hx_submit, but then refuses the GATE
+    elicitation mid-run ("Method not found"). It must become a legible,
+    snapshotted, resumable stop — not an uncaught crash that loses the run.
+    The completed stage's snapshot already exists, so it is resumable."""
     pytest.importorskip("mcp")
+    import json
+    import re
+
     import anyio
     import mcp.types as T
     from mcp.shared.memory import create_connected_server_and_client_session as conn
@@ -394,71 +405,37 @@ def test_midrun_sampling_failure_is_resumable_not_a_crash(project):
     from helix.core.snapshots import list_snapshots
     from helix.mcp.server import mcp as server
 
-    async def sampling_cb(context, params):
+    async def elicit_cb(context, params):  # gate refused
         return T.ErrorData(code=T.METHOD_NOT_FOUND, message="Method not found")
-
-    async def elicit_cb(context, params):  # advertises elicitation; unreached
-        return T.ElicitResult(action="accept", content={"action": "proceed"})
 
     def _txt(res):
         return "".join(c.text for c in res.content if c.type == "text")
 
     async def drive():
-        async with conn(server, sampling_callback=sampling_cb,
-                        elicitation_callback=elicit_cb) as client:
+        async with conn(server, elicitation_callback=elicit_cb) as client:
             await client.initialize()
-            res = await client.call_tool(
-                "run_pipeline", {"folder": str(project), "question": "BP?"})
-            status = await client.call_tool(
-                "hx_run_status", {"project": project.name})
-            return res.isError, _txt(res), _txt(status)
+            step = _txt(await client.call_tool("hx_step", {"folder": str(project)}))
+            stage = re.search(r"stage '([^']+)'", step).group(1)
+            token = re.search(r"pending_token='([^']+)'", step).group(1)
+            sub = _txt(await client.call_tool("hx_submit", {
+                "folder": str(project), "stage": stage,
+                "result_json": json.dumps(_AGENT_ANSWERS[stage]),
+                "pending_token": token}))
+            status = _txt(await client.call_tool(
+                "hx_run_status", {"project": project.name}))
+            return stage, sub, status
 
-    is_error, txt, status = anyio.run(drive)
-
-    # Clean tool return (a summary string), not an opaque exception crash.
-    assert is_error is False, txt
-    assert "error" in txt and "could not reach the model" in txt
-    assert "resumable" in txt
-    # Recorded as a resumable error: status + the legible note + a snapshot.
-    rec = runs.get_record(project=project.name)
+    stage, sub, status = anyio.run(drive)
+    assert stage == "scout"
+    # The scout step rendered fine; the gate after it could not be answered.
+    assert "could not ask you to confirm" in sub and "resumable" in sub
+    name = project.stem
+    rec = runs.get_record(project=name)
     assert rec is not None and rec.status == "error"
-    assert rec.last_snapshot and "could not reach the model" in (rec.note or "")
+    assert "could not ask you to confirm" in (rec.note or "")
     assert "error" in status
-    # The run was snapshotted, not lost — resume_pipeline has a target.
-    assert len(list_snapshots(project.name)) >= 1
-
-
-def test_unusable_sampling_response_is_legible(project):
-    """An empty / non-text sampling response must surface as a clear seam
-    error, not silently become the string "None" and fail JSON parsing with
-    a confusing downstream error."""
-    pytest.importorskip("mcp")
-    import anyio
-    import mcp.types as T
-    from mcp.shared.memory import create_connected_server_and_client_session as conn
-
-    from helix.mcp.server import mcp as server
-
-    async def sampling_cb(context, params):
-        return T.CreateMessageResult(
-            role="assistant", content=T.TextContent(type="text", text=""),
-            model="fake", stopReason="endTurn")
-
-    async def elicit_cb(context, params):
-        return T.ElicitResult(action="accept", content={"action": "proceed"})
-
-    async def drive():
-        async with conn(server, sampling_callback=sampling_cb,
-                        elicitation_callback=elicit_cb) as client:
-            await client.initialize()
-            res = await client.call_tool(
-                "run_pipeline", {"folder": str(project), "question": "BP?"})
-            return res.isError, "".join(
-                c.text for c in res.content if c.type == "text")
-
-    is_error, txt = anyio.run(drive)
-    assert is_error is False, txt
-    assert "error" in txt and "unusable sampling response" in txt
+    # scout was snapshotted before the gate — the run is not lost.
+    assert len(list_snapshots(name)) >= 2  # init + scout
 
 
 def test_bridge_translates_lost_connection():
@@ -506,13 +483,8 @@ def test_run_is_self_rooted_under_folder_not_server_cwd(tmp_path, monkeypatch):
     so a misrooted/stale server can no longer silently write a run into the
     wrong project."""
     pytest.importorskip("mcp")
-    import anyio
-    import mcp.types as T
-    from mcp.shared.memory import create_connected_server_and_client_session as conn
-
     from helix import config, runs
     from helix.core.snapshots import list_snapshots
-    from helix.mcp.server import mcp as server
 
     server_home = tmp_path / "unrelated-server-cwd"
     server_home.mkdir()
@@ -523,29 +495,8 @@ def test_run_is_self_rooted_under_folder_not_server_cwd(tmp_path, monkeypatch):
     (proj / "helix.toml").write_text(
         '[atlas]\npath = "atlas"\n\n[limits]\ntoken_cap = 0\ncall_cap = 0\n')
 
-    async def sampling_cb(context, params):
-        return T.CreateMessageResult(
-            role="assistant", content=T.TextContent(type="text", text="{}"),
-            model="fake", stopReason="endTurn")
-
-    async def elicit_cb(context, params):
-        return T.ElicitResult(action="accept", content={"action": "proceed"})
-
-    def _txt(res):
-        return "".join(c.text for c in res.content if c.type == "text")
-
-    async def drive():
-        async with conn(server, sampling_callback=sampling_cb,
-                        elicitation_callback=elicit_cb) as client:
-            await client.initialize()
-            res = await client.call_tool(
-                "run_pipeline",
-                {"folder": str(proj), "question": "BP?", "autonomy_until": "END"})
-            return res.isError, _txt(res)
-
-    is_error, txt = anyio.run(drive)
-    assert is_error is False, txt
-    assert "done (stages=6" in txt
+    final, seen = _drive_steps(str(proj))
+    assert "done (stages=6" in final, final
 
     # Everything the run produced is under the *folder*, not the server root.
     assert (proj / ".helix" / "snapshots").is_dir()
@@ -559,4 +510,27 @@ def test_run_is_self_rooted_under_folder_not_server_cwd(tmp_path, monkeypatch):
     with config.use_root(proj):
         rec = runs.get_record(project="bpalgo")
         assert rec is not None and rec.status == "done"
-        assert len(list_snapshots("bpalgo")) == 6
+        assert len(list_snapshots("bpalgo")) == 7  # init + 6 stages
+
+
+def test_pipeline_runs_agent_driven_without_sampling(project):
+    """The whole pipeline runs through hx_step/hx_submit with NO sampling
+    callback — Claude Code's exact constraint. The test plays the agent,
+    feeding each stage's JSON. Proves suspend→submit→snapshot→next over the
+    real core, gates via elicitation, the deterministic validator handled
+    in-loop, ending in a normal done summary."""
+    pytest.importorskip("mcp")
+    from helix import runs
+    from helix.core.snapshots import list_snapshots
+
+    final, seen = _drive_steps(str(project))
+    assert "done (stages=6" in final, final
+    # Five LLM stages round-tripped; deterministic validator ran in-loop.
+    assert seen == ["scout", "critic_methods", "planner", "builder",
+                    "critic_results"]
+    name = project.stem
+    assert len(list_snapshots(name)) == 7  # init "start" + 6 stage snapshots
+    rec = runs.get_record(project=name)
+    assert rec is not None and rec.status == "done"
+    assert runs.get_pending(name) is None  # consumed
+    assert (project / "atlas" / "projects" / name / "overview.md").is_file()

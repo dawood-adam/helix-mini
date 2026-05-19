@@ -23,7 +23,10 @@ starts the server automatically.
 
 ## Driving a run
 
-Work in plain language. The client calls Helix's tools.
+Work in plain language. The client calls Helix's tools — and its agent
+*is* the model: Helix hands each stage's prompt back to Claude Code, which
+reasons and returns the result. There is no sampling and no API key; the
+client manages the loop for you, so the experience is still conversational.
 
 ```text
 you>   start helix
@@ -44,9 +47,10 @@ you>   run autonomously until the validator
 helix> ...
 ```
 
-`hx_start` runs that setup conversation through MCP elicitation and starts
-the pipeline. `run_pipeline(folder, autonomy_until)` is the same run without
-the wizard.
+`hx_start` runs that setup conversation through MCP elicitation, then starts
+the run and returns the first stage's prompt; the agent answers it via
+`hx_submit` and the loop continues to the end. `run_pipeline(folder,
+autonomy_until)` is the same, without the wizard.
 
 If the source folder has no material yet, `hx_start` does not error or start
 a run that would only fail at Scout — it creates the folder and tells you
@@ -89,9 +93,10 @@ project's Scout reads the same Atlas, so knowledge compounds.
   trail (persisted; survives a server restart).
 - `snapshot_list` / `snapshot_show` / `snapshot_diff` / `snapshot_timeline`
   — the history.
-- `resume_pipeline(project, snapshot, at=, branch=)` — rebuild a snapshot's
-  state and re-enter at any stage; a new branch keeps an experiment off the
-  main line.
+- `resume_pipeline(project, snapshot, at=, branch=, folder=)` — rebuild a
+  snapshot's state and re-enter at any stage, returning the next prompt;
+  a new branch keeps an experiment off the main line, and `folder` roots
+  it at the project regardless of the server's working directory.
 - `snapshot_revert` — write a snapshot's artifacts back to disk without
   running anything.
 - The `hot://<project>` resource is a one-page working-state cache,
@@ -100,9 +105,10 @@ project's Scout reads the same Atlas, so knowledge compounds.
 ## Limits
 
 `helix.toml [limits]` sets `token_cap` and `call_cap`. The token figure is a
-server-side estimate (sampling does not report usage). Reaching a cap pauses
-the run and records a resumable snapshot; interactively, you are offered the
-choice to raise the ceiling instead.
+server-side estimate (≈ chars/4 of each stage's prompt plus the agent's
+submitted answer). Reaching a cap pauses the run and records a resumable
+snapshot; interactively, you are offered the choice to raise the ceiling
+instead.
 
 ## Component guides
 
