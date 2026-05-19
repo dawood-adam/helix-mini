@@ -7,12 +7,17 @@ import pytest
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    """Isolate HELIX_HOME to a tmp dir with a source folder + question."""
-    monkeypatch.setenv("HELIX_HOME", str(tmp_path))
+    """An isolated project whose source folder *is* its workspace root.
+
+    A run self-roots at its source folder (config.use_root), so the folder
+    and HELIX_HOME are the same directory here — the intended
+    one-folder-per-workspace model, and what keeps read-back tools
+    (resolved via HELIX_HOME) consistent with what the run wrote."""
     src = tmp_path / "src-papers"
     src.mkdir()
+    monkeypatch.setenv("HELIX_HOME", str(src))
     (src / "paper.md").write_text("# Paper\nCFD cardiac simulation findings.")
-    (tmp_path / "helix.toml").write_text(
+    (src / "helix.toml").write_text(
         '[atlas]\npath = "atlas"\n\n[limits]\ntoken_cap = 0\ncall_cap = 0\n'
     )
     return src

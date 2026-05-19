@@ -50,6 +50,18 @@ class Declined(Exception):
     (mirrors the cost-ceiling pause)."""
 
 
+class ClientUnavailable(Exception):
+    """The MCP client seam failed mid-run: a sampling/elicitation callback
+    was refused ("Method not found" / "not supported"), the connection
+    dropped, the sync↔async bridge broke, or the client returned an
+    unusable response.
+
+    Standardized like :class:`Declined`: a model/elicitation call that
+    cannot complete raises this instead of leaking a raw protocol error, and
+    the orchestrator turns it into a snapshotted, resumable stop rather than
+    crashing the run and losing all progress."""
+
+
 # --- Typed schema builders (the "almost programmatic" vocabulary) ----------
 #
 # MCP elicitation schemas are intentionally flat: a single object whose

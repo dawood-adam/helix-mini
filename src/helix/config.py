@@ -11,7 +11,9 @@ a vestigial stub kept only so the loop/agent signatures stay stable.
 
 from __future__ import annotations
 
+import contextvars
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,8 +33,39 @@ CALL_CAP_DEFAULT = 60
 # --- Paths ------------------------------------------------------------------
 
 
+# A run binds its own root (the resolved source folder) here, so the whole
+# pipeline — atlas, .helix/snapshots, runs, hot, decisions — is self-contained
+# under that folder and immune to the server process's launch cwd. This
+# mirrors ``helix.io.use``: per-run state threaded via a contextvar, never a
+# global. Unbound (every non-run tool, and resume without a folder) falls back
+# to HELIX_HOME / cwd, so prior behaviour is unchanged where it was already
+# correct.
+_RUN_ROOT: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "helix_run_root", default=None
+)
+
+
+@contextmanager
+def use_root(path: str | Path | None):
+    """Bind the project root for the duration of a run. Empty / ``None`` is a
+    no-op (keeps the HELIX_HOME / cwd fallback) so callers can wrap
+    unconditionally."""
+    if not path:
+        yield
+        return
+    token = _RUN_ROOT.set(Path(path).expanduser().resolve())
+    try:
+        yield
+    finally:
+        _RUN_ROOT.reset(token)
+
+
 def project_root() -> Path:
-    """The helix project directory. ``HELIX_HOME`` overrides the cwd."""
+    """The helix project directory. A run binds it to its source folder
+    (:func:`use_root`); otherwise ``HELIX_HOME`` overrides the process cwd."""
+    bound = _RUN_ROOT.get()
+    if bound is not None:
+        return bound
     return Path(os.environ.get("HELIX_HOME", Path.cwd())).resolve()
 
 
@@ -44,7 +77,11 @@ def helix_dir() -> Path:
 
 
 def _load_env() -> None:
-    for env in (helix_dir() / ".env", project_root() / ".env"):
+    # Probe paths without materialising .helix/: this runs at import, before
+    # any run binds a root, so calling helix_dir() here would scatter an
+    # empty .helix into whatever cwd the server happened to launch in.
+    root = project_root()
+    for env in (root / ".helix" / ".env", root / ".env"):
         if env.exists():
             load_dotenv(env, override=False)
     load_dotenv(override=False)
