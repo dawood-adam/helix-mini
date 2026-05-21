@@ -14,12 +14,11 @@ Code agent *is* the model. Each stage hands its prompt back to the
 agent through the tool loop (`hx_step` / `hx_submit`); the server runs
 no sampling and stores no API keys.
 
-```
- Scout → Scout Critic → Planner → Builder → Validator → Results Critic
-   │           │            │         │          │             │
-   └───────────┴────────────┴─── snapshot · gate · transition ─┘
-                              (HITL at every gate by default)
-```
+
+<p align="center">
+  <img src="docs/workflow_process_and_version_control_diagram.svg" alt="Helix workflow and version-control diagram" width="100%">
+</p>
+
 
 📖 **Full docs**: [dawood-adam.github.io/helix-mini](https://dawood-adam.github.io/helix-mini/)
 (or open `docs/index.html` locally).
