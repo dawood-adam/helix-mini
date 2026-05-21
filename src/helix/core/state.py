@@ -32,6 +32,12 @@ class PipelineState:
     verdict: str = ""
     build_iterations: int = 0
 
+    # Workstream F.5 — TDD task loop. Each entry: ``{task_id, phase, at}``.
+    # Builder advances strictly test → impl → refactor per task; the
+    # ``_map_builder`` guardrails reject batched submissions and
+    # phase-jumps based on this trace.
+    completed_tasks: list[dict] = field(default_factory=list)
+
     # Send-back feedback: {"from_stage","target_stage","note","ts"}
     human_feedback: list[dict] = field(default_factory=list)
 

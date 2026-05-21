@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Technical architecture · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>technical architecture</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="architecture-conceptual.html">Conceptual</a>
+      <a href="architecture-technical.html" class="active">Technical</a>
+      <a href="forge.html">Forge</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#layers">The three layers</a></li>
+    <li><a href="#modules">Module layout</a></li>
+    <li><a href="#invariants">Invariants</a></li>
+    <li><a href="#client-io">The client-IO seam</a></li>
+    <li><a href="#advance">A step: <code>loop.advance</code></a></li>
+    <li><a href="#agent-driven">Agent-driven (no sampling)</a></li>
+    <li><a href="#runs">Run control + registry</a></li>
+    <li><a href="#sandbox">Sandbox model</a></li>
+    <li><a href="#storage">On-disk layout</a></li>
+    <li><a href="#testing">Test architecture</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Technical architecture</h1>
+<p class="lede">Module boundaries, request flow, and the invariants that keep the codebase small.</p>
+
+<h2 id="layers">The three layers</h2>
+
+<p>
+  Helix is built as three concentric layers. The outer two are thin;
+  the inner one is the system.
+</p>
+
+<table>
+  <tr><th>Layer</th><th>Module</th><th>Imports</th><th>Responsibility</th></tr>
+  <tr>
+    <td>Drive surface</td>
+    <td><code>helix/mcp/</code></td>
+    <td><code>mcp</code> SDK, <code>helix.core</code>, <code>helix.io</code></td>
+    <td>One stdio MCP server (FastMCP). Tools / resources / prompts. The only module that imports the SDK.</td>
+  </tr>
+  <tr>
+    <td>Orchestrator</td>
+    <td><code>helix/orchestrator/loop.py</code></td>
+    <td><code>helix.core</code>, <code>helix.io</code>, <code>helix.llm</code></td>
+    <td>One runner. <code>advance</code> is the unit: run a stage → snapshot → consult the gate → transition. <code>step_begin</code> / <code>submit_stage</code> / <code>resume_step</code> all re-enter it.</td>
+  </tr>
+  <tr>
+    <td>Core</td>
+    <td><code>helix/core/</code></td>
+    <td>stdlib, <code>yaml</code>, (optionally <code>fastembed</code> for embed.py)</td>
+    <td>Pure pipeline + Atlas + snapshots + threads + spec + hypothesis + lint. Dependency-light: imports neither <code>mcp</code> nor <code>fastembed</code> at module level.</td>
+  </tr>
+</table>
+
+<div class="mermaid">
+flowchart TB
+  subgraph drive[Drive surface — helix/mcp/]
+    S[server.py — FastMCP tools / resources / prompts]
+    CIO[client_io.py — MCP-backed ClientIO]
+  end
+  subgraph orch[Orchestrator — helix/orchestrator/loop.py]
+    A[advance · step_begin · submit_stage · resume_step]
+  end
+  subgraph core[Core — helix/core/]
+    AG[agents · stages · decisions]
+    GT[gates · transitions · plan]
+    AT[atlas · atlas_index · embed · recall · ingest · lint]
+    TH[threads · spec · hypothesis · constitution · reports]
+    SN[snapshots · hot]
+  end
+  IO[helix/io.py — client-IO seam]
+  SB[helix/sandbox.py]
+  CFG[helix/config.py]
+  RN[helix/runs.py — bounded registry]
+  S --&gt; A
+  S --&gt; AT
+  S --&gt; TH
+  S --&gt; SN
+  A --&gt; AG --&gt; AT
+  A --&gt; GT
+  A --&gt; SN
+  AG --&gt; SB
+  AT --&gt; SB
+  TH --&gt; SB
+  S -.elicitation.-&gt; CIO --&gt; IO
+  S --&gt; RN
+  S --&gt; CFG
+  classDef d fill:#ddf4ff,stroke:#0550ae;
+  classDef o fill:#fff8c5,stroke:#bf3989,color:#573a08;
+  classDef c fill:#dafbe1,stroke:#1a7f37;
+  class drive d
+  class orch o
+  class core c
+</div>
+
+<h2 id="modules">Module layout</h2>
+
+<pre><code>src/helix/
+├── __init__.py
+├── app.py                # in-process harness facade (tests + embed pipeline)
+├── agent_iface.py        # pure tool bodies (atlas_status_text, decision_log_text, …)
+├── atlas_init.py         # idempotent Atlas tree scaffolder
+├── cli.py                # `helix init` (workspace) + `helix new` (project) + `helix mcp`
+├── config.py             # paths + limits + per-run use_root (contextvar)
+├── io.py                 # ClientIO Protocol; ask_text/choice/multi/confirm; gate_asker; NeedsModel/Declined/ClientUnavailable
+├── llm.py                # call_llm_json + the bound JSON-responder seam (use_responder)
+├── runs.py               # bounded run registry: record.json, events.jsonl, pending step
+├── sandbox.py            # validate_project_name + sanitize_atlas_writes/code_artifacts + …
+│
+├── core/                 # pure pipeline + storage
+│   ├── agents.py         # markdown agents, _CONTEXT / _MAP tables, run_agent
+│   ├── atlas.py          # the store; Page/PageWrite/Atlas; iter_pages (canonical scan)
+│   ├── atlas_index.py    # in-memory SQLite edge graph (rebuilt per query)
+│   ├── constitution.py   # workspace constitution (F.1) loader + ensure
+│   ├── decisions.py      # DecisionCard + decisions.md log + render_report passthrough
+│   ├── embed.py          # lazy fastembed wrapper; cache in .helix/embeddings.json
+│   ├── gates.py          # GateReport, GateDecision, decide_gate, record_feedback
+│   ├── hot.py            # the project hot cache (one page, regen at run end)
+│   ├── hypothesis.py     # Hypothesis dataclass + rank + rediscover-loop helpers (H)
+│   ├── ingest.py         # ingest_folder (Scout source read) + ingest_inbox (atlas/inbox)
+│   ├── lint.py           # 11-kind hygiene linter + label-propagation communities
+│   ├── plan.py           # Plan + Step (run-scoped control config; threaded, never on state)
+│   ├── recall.py         # auto-routing find/fetch (lexical/semantic/graph/community)
+│   ├── reports.py        # self-contained HTML reports + annotation overlay
+│   ├── snapshots.py      # content-addressed DAG (mint, load, branch, freeze, fork)
+│   ├── spec.py           # spec.md schema + question_check + scan_clarifications (B + F.2/F.3)
+│   ├── stages.py         # run_stage thin wrapper (StageResult)
+│   ├── state.py          # PipelineState dataclass
+│   ├── threads.py        # longitudinal artifacts (E) + glossary parser (F.4)
+│   └── transitions.py    # next_stage — the single routing authority
+│
+├── orchestrator/
+│   └── loop.py           # advance + step_begin/submit_stage/resume_step
+│
+├── mcp/                  # the drive surface (only place mcp SDK lives)
+│   ├── server.py         # FastMCP tools / resources / prompts
+│   └── client_io.py      # McpClientIO adapter
+│
+└── builtin_agents/       # the six agents, as markdown
+    ├── scout.md
+    ├── scout_critic.md
+    ├── planner.md
+    ├── builder.md
+    ├── validator.md      # kind: deterministic
+    └── critic_results.md</code></pre>
+
+<h2 id="invariants">Invariants</h2>
+
+<p>These are enforced by tests and by the module structure itself:</p>
+
+<ol>
+  <li><strong>Dependency-light core.</strong> <code>helix.core</code>,
+    <code>helix.io</code>, and <code>helix.orchestrator.loop</code>
+    import without the <code>mcp</code> SDK or <code>fastembed</code>.
+    SDK contact is confined to <code>helix/mcp/</code>; the embedding
+    model is lazy-imported inside <code>helix.core.embed</code>.</li>
+  <li><strong>One router.</strong> All pipeline routing goes through
+    <code>core.transitions.next_stage</code>. Add routing logic
+    there, never in the orchestrator.</li>
+  <li><strong>One runner.</strong> <code>loop.advance</code> is the
+    unit. <code>step_begin</code> / <code>submit_stage</code> /
+    <code>resume_step</code> all re-enter it; there is no parallel
+    pipeline.</li>
+  <li><strong>A snapshot never calls a model.</strong>
+    <code>mint_snapshot</code> serializes state and content-addresses
+    artifacts; it stores the stage's Decision Card as the human
+    digest. Reports are rendered from the card + threads + spec
+    (also model-free).</li>
+  <li><strong>Agent-driven, no credentials.</strong> The model is the
+    client agent, reached only through the tool loop
+    (<code>hx_step</code> / <code>hx_submit</code>) via the
+    JSON-responder seam (<code>llm.use_responder</code>, a
+    contextvar). No server-side sampling; nothing holds API keys.</li>
+  <li><strong>Run control is run-scoped.</strong> The <code>Plan</code>
+    (<code>core.plan</code>) is threaded through the loop alongside
+    <code>ask</code> / <code>interactive</code>. It is <em>never</em>
+    a <code>PipelineState</code> field, so it never lands in a
+    snapshot. <code>autonomy_until</code> survives as a compat
+    constructor.</li>
+  <li><strong>Sandbox-first.</strong> Model-controlled strings
+    reaching the filesystem are confined by <code>sandbox</code>:
+    page / artifact content via <code>sanitize_atlas_writes</code> /
+    <code>sanitize_code_artifacts</code>; project / run / thread /
+    bundle / spec names via <code>validate_project_name</code> at
+    every filesystem path root.</li>
+  <li><strong>One page scan.</strong> <code>core.atlas.iter_pages</code>
+    is the canonical walk. <code>atlas_index</code>, <code>embed</code>,
+    <code>recall</code>, and <code>lint</code> all adapt it rather than
+    re-walking the tree.</li>
+</ol>
+
+<h2 id="client-io">The client-IO seam</h2>
+
+<p>
+  <code>helix/io.py</code> is the single place anything is sent back
+  to the client. The seam has one callback today:
+</p>
+
+<pre><code>class ClientIO(Protocol):
+    def elicit(self, req: ElicitRequest) -&gt; ElicitResult: ...
+</code></pre>
+
+<p>
+  Schemas are flat (string / enum / boolean / array), built by
+  <code>ask_text</code> / <code>ask_choice</code> / <code>ask_multi</code>
+  / <code>ask_confirm</code>. A run binds an implementation for its
+  duration via <code>use(io)</code>; any component reaches it via
+  <code>current()</code>. The pipeline core is synchronous and deep;
+  the MCP session is asynchronous. The seam bridges them through an
+  <code>anyio</code> worker thread.
+</p>
+
+<p>
+  <code>helix/mcp/client_io.py</code> is the only real implementation.
+  Tests inject a scripted IO (a queue of <code>ElicitResult</code>) or
+  drive the step loop directly with a pre-baked answer.
+</p>
+
+<p>
+  The model is <em>not</em> on this seam. It is the client agent,
+  reached through the tool loop via the JSON-responder seam in
+  <code>helix/llm.py</code> (a contextvar set by the loop's
+  <code>_render_responder</code> and <code>_inject_responder</code>).
+</p>
+
+<h2 id="advance">A step: <code>loop.advance</code></h2>
+
+<p>
+  <code>loop.advance(state, ctx, atlas, current, last_id, *, ask, plan, branch)</code>
+  is the unit. It does four things in order, exactly once per call:
+</p>
+
+<ol>
+  <li><strong>Run the stage.</strong> <code>stages.run_stage</code> →
+    <code>agents.run_agent</code>. The stage's model call routes through
+    the bound JSON responder. In agent-driven mode the responder
+    raises <code>NeedsModel</code> the first time, which unwinds out
+    of <code>advance</code> <em>before</em> any Atlas write or
+    snapshot — the prior snapshot is the resume point. Deterministic
+    stages (the Validator) run straight through with no round-trip.</li>
+  <li><strong>Mint a snapshot.</strong> <code>mint_snapshot</code>
+    serializes state, content-addresses artifact bytes, and stores
+    the stage's Decision Card. Zero model calls.</li>
+  <li><strong>Write the HTML report.</strong>
+    <code>_write_report</code> renders a self-contained per-stage
+    HTML file at <code>atlas/projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code>
+    (overwritten each run; history lives in the snapshot DAG).
+    Best-effort: a renderer failure logs and skips, never breaks the
+    run.</li>
+  <li><strong>Resolve the gate + transition.</strong>
+    <code>gates.decide_gate</code> consults the Plan; an <em>ask</em>
+    routes through the client-IO seam as elicitation. The decision
+    feeds <code>transitions.next_stage</code>, which returns the next
+    stage, an earlier stage (send-back), or <code>END</code>.</li>
+</ol>
+
+<div class="mermaid">
+sequenceDiagram
+  participant Client as MCP client (agent)
+  participant Srv as helix/mcp/server.py
+  participant L as loop.advance
+  participant R as run_agent
+  participant Resp as JSON responder (llm.use_responder)
+  participant At as Atlas + sandbox
+  participant Sn as snapshots
+  participant G as gates · transitions
+  Client-&gt;&gt;Srv: hx_step(folder)
+  Srv-&gt;&gt;L: step_begin
+  L-&gt;&gt;R: run_stage(scout)
+  R-&gt;&gt;Resp: call_llm_json(model, system, user)
+  Resp--&gt;&gt;R: raise NeedsModel(stage, system, user)
+  R--&gt;&gt;L: unwinds
+  L--&gt;&gt;Srv: StepOutcome(needs_model, stage, prompt)
+  Srv-&gt;&gt;Srv: runs.set_pending(...)
+  Srv--&gt;&gt;Client: tool result: NEEDS MODEL — prompt + token
+
+  Client-&gt;&gt;Srv: hx_submit(stage, json, token)
+  Srv-&gt;&gt;L: submit_stage(prior_snap, json)
+  L-&gt;&gt;R: run_stage(scout)  (re-entered)
+  R-&gt;&gt;Resp: call_llm_json(...)
+  Resp--&gt;&gt;R: (parsed_answer, tokens)
+  R-&gt;&gt;At: sanitize_atlas_writes → Atlas.write
+  R--&gt;&gt;L: StageResult(updates, card)
+  L-&gt;&gt;Sn: mint_snapshot
+  L-&gt;&gt;L: _write_report
+  L-&gt;&gt;G: decide_gate (elicit if needed)
+  G--&gt;&gt;L: GateDecision
+  L-&gt;&gt;G: next_stage
+  L--&gt;&gt;Srv: needs_model(scout_critic) | done
+  Srv--&gt;&gt;Client: next prompt or done summary
+</div>
+
+<h2 id="agent-driven">Agent-driven (no sampling)</h2>
+
+<p>
+  There is exactly <strong>one</strong> model-consumption site in the
+  whole server: <code>core.agents.run_agent</code> →
+  <code>llm.call_llm_json</code>. Inverting that one seam makes the
+  entire server run through the client agent. The other subsystems —
+  Atlas, snapshots, recall, ingest, lint, gates, transitions, runs,
+  hot — were already deterministic.
+</p>
+
+<p>Two responders, one contextvar:</p>
+
+<pre><code>def _render_responder(stage):
+    def _r(model, system, user):
+        raise NeedsModel(stage, system, user)
+    return _r
+
+def _inject_responder(answer):
+    def _r(model, system, user):
+        parsed = parse_json_text(answer) if isinstance(answer, str) else answer
+        tokens = (len(system) + len(user) + len(json.dumps(parsed))) // 4
+        return parsed, int(tokens)
+    return _r</code></pre>
+
+<p>
+  <code>hx_step</code> binds the render responder and pins the
+  resulting prompt to the pending step.
+  <code>hx_submit</code> rehydrates state from the prior snapshot and
+  binds the inject responder, so when <code>run_agent</code> re-runs
+  the same stage, the model call returns the agent's submitted JSON
+  where the model answer would have been. The atlas write,
+  snapshot, gate, and transition all proceed unchanged.
+</p>
+
+<h2 id="runs">Run control + registry</h2>
+
+<p>
+  <code>helix.runs</code> is a small persistence layer that lives
+  outside the pipeline core (it imports <code>helix.config</code> and
+  <code>helix.sandbox.validate_project_name</code>, never
+  <code>helix.core</code>):
+</p>
+
+<ul>
+  <li><strong>Per run, on disk:</strong> <code>.helix/runs/&lt;run_id&gt;/record.json</code>
+    (status, current stage, last snapshot, tokens) and
+    <code>events.jsonl</code> (transition log). Survives a server
+    restart.</li>
+  <li><strong>Per project, on disk:</strong>
+    <code>.helix/runs/&lt;project&gt;.pending.json</code> — the
+    suspended step (run_id, stage, resume_from, branch, pinned system,
+    pinned user, token, autonomy, clarifications). Picked up by the
+    next <code>hx_step</code>.</li>
+  <li><strong>In-memory:</strong> a <code>_Live</code> holds the run's
+    live <code>Plan</code> so <code>hx_run_plan_set</code> can steer it
+    and <code>hx_run_status</code> / <code>hx_run_events</code> can
+    observe it.</li>
+</ul>
+
+<p>
+  Live continuation is via snapshots and <code>resume_pipeline</code>,
+  not the registry. The registry adds observability and survives a
+  restart; it is not a runtime.
+</p>
+
+<h2 id="sandbox">Sandbox model</h2>
+
+<p>The threat model is straightforward: <strong>treat every
+  model-generated string as untrusted</strong>, including ones
+  the user-friendly elicitation produces (the model is the agent;
+  prompt-injection in ingested sources can influence both).</p>
+
+<table>
+  <tr><th>Surface</th><th>Validator</th><th>What it guards</th></tr>
+  <tr><td>Atlas page writes</td><td><code>sandbox.sanitize_atlas_writes</code></td><td>Path under <code>{sources,concepts,entities,projects}/</code>, no traversal, length caps; title sanitised; content size-capped + control-stripped; action normalised; provenance whitelisted; spec_refs / aliases / links cleaned.</td></tr>
+  <tr><td>Builder code artifacts</td><td><code>sandbox.sanitize_code_artifacts</code></td><td>Validated relative names under the artifacts dir; size-capped content; never executed.</td></tr>
+  <tr><td>Project / run / bundle names</td><td><code>sandbox.validate_project_name</code></td><td>No path separators, no <code>..</code>, no leading dot/hyphen; length cap; control chars stripped. Used by <code>runs.py</code>, <code>snapshots.py</code>, <code>hot.py</code>, <code>core/spec.spec_path</code>, <code>core/threads._resolve_path</code>.</td></tr>
+  <tr><td>Ingest symlinks</td><td><code>sandbox.validate_ingest_source</code></td><td>Rejects symlinks pointing outside the input folder.</td></tr>
+  <tr><td>Atlas path resolution (defense-in-depth)</td><td><code>Atlas._safe_resolve</code></td><td><code>(root / rel).resolve().is_relative_to(root.resolve())</code>.</td></tr>
+</table>
+
+<h2 id="storage">On-disk layout</h2>
+
+<pre><code>&lt;workspace&gt;/
+├── helix.toml                              # [workspace] + [atlas].path
+├── .mcp.json
+├── constitution.md
+├── AGENTS.md
+├── atlas/                                  # the wiki (shared across projects)
+│   ├── ATLAS.md  index.md  log.md
+│   ├── inbox/  raw/
+│   ├── sources/  concepts/  entities/  entities/datasets/
+│   ├── concepts/glossary/                  # workspace-shared Ubiquitous Language
+│   └── projects/&lt;id&gt;/
+│       ├── spec.md                          # B + F.2/F.3
+│       ├── plan.md
+│       ├── threads/                         # E
+│       │   ├── hypothesis.md  data.md  design.md  code-org.md  glossary.md
+│       ├── reports/&lt;stage&gt;.html             # D — self-contained
+│       ├── syntheses/&lt;slug&gt;.md
+│       ├── decisions.md
+│       └── _hot.md                          # regenerated at run end
+├── forks/&lt;name&gt;.tar.gz                     # exported snapshot bundles
+└── &lt;project&gt;/                              # one per `helix new &lt;project&gt;`
+    ├── question.md  helix.toml  CLAUDE.md  .mcp.json
+    └── .helix/
+        ├── snapshots/&lt;project&gt;/             # &lt;id&gt;.json, index.json, refs.json, objects/&lt;sha&gt;
+        ├── runs/&lt;run_id&gt;/                   # record.json, events.jsonl
+        ├── runs/&lt;project&gt;.pending.json      # suspended step (agent's turn)
+        └── embeddings.json                  # body-hash-keyed vector cache</code></pre>
+
+<p>
+  <code>config.workspace_root()</code> resolves the workspace marker
+  (<code>helix.toml [workspace]</code> via ancestor walk-up, or
+  <code>HELIX_ATLAS</code>, or <code>HELIX_HOME</code>, or the run
+  root as a final fallback). <code>config.helix_dir()</code> is
+  per-project (operational state stays close to the project).
+  <code>config.use_root(path)</code> is a contextvar that scopes
+  resolution for a single run.
+</p>
+
+<h2 id="testing">Test architecture</h2>
+
+<p>Two harnesses, three layers:</p>
+
+<table>
+  <tr><th>Layer</th><th>Harness</th><th>Covers</th></tr>
+  <tr><td>Core (pure)</td><td>Direct pytest</td><td><code>spec.py</code>, <code>threads.py</code>, <code>reports.py</code>, <code>constitution.py</code>, <code>hypothesis.py</code>, atlas action semantics, the 11 lint checks, the TDD task guardrails.</td></tr>
+  <tr><td>Pipeline</td><td><code>app.run</code> + <code>conftest.fake_llm</code></td><td>End-to-end stage walk with a fake LLM (routed by system-prompt keyword). Verifies the agent-driven inversion, the rediscover loop iteration cap, the Plan-driven autonomy modes.</td></tr>
+  <tr><td>MCP drive surface</td><td><code>mcp.shared.memory.create_connected_server_and_client_session</code> + scripted <code>elicitation_callback</code></td><td>Tools end-to-end: <code>hx_step</code> → feed JSON → <code>hx_submit</code>, looping to the done summary. Resources read back (<code>thread://</code>, <code>hot://</code>, etc.).</td></tr>
+</table>
+
+<p>
+  Optional-dependency paths (<code>mcp</code>, <code>fastembed</code>)
+  are guarded with <code>pytest.importorskip</code>; the surrounding
+  logic is tested model-free via injected functions.
+</p>
+
+<p>
+  Run the suite:
+</p>
+
+<pre><code>pip install -e '.[dev]'
+pytest -q                       # 206 passing, 1 skipped (optional fastembed)
+
+# In a git worktree the editable install resolves to the main checkout:
+PYTHONPATH="$PWD/src" pytest -q</code></pre>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="architecture-conceptual.html">← Conceptual architecture</a> &nbsp;·&nbsp;
+  <a href="forge.html">Forge →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

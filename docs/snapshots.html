@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Snapshots — version control · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>snapshots — version control</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="gates.html">Gates</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html" class="active">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#what">What is a snapshot</a></li>
+    <li><a href="#zero-cost">Zero cost</a></li>
+    <li><a href="#storage">Storage</a></li>
+    <li><a href="#inspect">Inspect</a></li>
+    <li><a href="#branches">Branch, freeze, fork</a></li>
+    <li><a href="#resume">Resume &amp; revert</a></li>
+    <li><a href="#pause">Pauses</a></li>
+    <li><a href="#bundle">The fork bundle</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Snapshots — version control</h1>
+<p class="lede">A content-addressed DAG of every transition. Branchable, freezable, forkable, resumable.</p>
+
+<h2 id="what">What is a snapshot</h2>
+
+<p>
+  A snapshot is a saved point in a run: the full
+  <code>PipelineState</code> at one transition, stamped with the stage,
+  timestamp, parent, and branch. A run opens with a <code>start</code>
+  snapshot (so it is resumable before the first stage even completes),
+  then Helix mints one <em>after every stage</em> and <em>every
+  send-back</em>. The history is a real DAG — inspectable, diffable,
+  branchable, and resumable from any point.
+</p>
+
+<div class="mermaid">
+gitGraph
+   commit id: "start"
+   commit id: "scout"
+   commit id: "scout_critic"
+   branch rppg-v2
+   commit id: "scout (send-back, restricted)"
+   commit id: "scout_critic"
+   checkout main
+   commit id: "planner"
+   commit id: "builder"
+   commit id: "validator"
+   commit id: "critic_results — ship"
+</div>
+
+<p>
+  In this trace the gate after the first Scout Critic was a send-back
+  to Scout with a directive ("restrict to 2024 papers"); the
+  orchestrator branched at <code>rppg-v2</code>, re-ran Scout and the
+  Critic on that branch, and the user later checked out the main line.
+  Both branches remain resumable.
+</p>
+
+<h2 id="zero-cost">Zero cost</h2>
+
+<p>
+  A snapshot calls <strong>no model</strong>. It serializes state and
+  stores the stage's Decision Card as the human-readable digest —
+  content the stage already produced. Artifact bytes are
+  content-addressed under
+  <code>.helix/snapshots/&lt;project&gt;/objects/&lt;sha256&gt;</code>
+  and referenced by hash; identical files across iterations are stored
+  once, and the state record never inlines bytes.
+</p>
+
+<p>
+  A snapshot stays a few kilobytes after hundreds of cycles, which is
+  why per-stage snapshots are affordable and cycling has no fixed cap
+  beyond the budget.
+</p>
+
+<h2 id="storage">Storage</h2>
+
+<pre><code>.helix/snapshots/&lt;project&gt;/
+├── &lt;id&gt;.json        one snapshot (state + Decision Card + manifest)
+├── index.json       the ordered DAG (id, parent, branch, stage, ts)
+├── refs.json        {tags: {…}, branches: {…}}
+└── objects/&lt;sha&gt;    content-addressed artifact bytes</code></pre>
+
+<p>
+  A snapshot file holds:
+</p>
+
+<pre><code>{
+  "id": "7",
+  "ts": "2026-05-19T15:42:00+00:00",
+  "stage": "critic_results",
+  "parent": "6",
+  "branch": "main",
+  "report": {"decision": "verdict: ship", "rationale": "…"},
+  "decision_card": { … the Decision Card the stage produced … },
+  "state": { … serialized PipelineState, with artifact bytes replaced … },
+  "manifest": {
+    "src/sim.py":       "8a3d…",     // sha256 references into objects/
+    "tests/test_x.py":  "f12b…"
+  }
+}</code></pre>
+
+<p>
+  <code>index.json</code> is the DAG: ordered tuples of
+  <code>(id, parent, branch, stage, ts)</code>.
+  <code>refs.json</code> holds named tags (via
+  <code>hx_snap_freeze</code>) and named branches (via
+  <code>hx_snap_branch</code>).
+</p>
+
+<h2 id="inspect">Inspect</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Shows</th></tr>
+  <tr><td><code>snapshot_list(project)</code></td><td>The DAG, git-log style.</td></tr>
+  <tr><td><code>snapshot_show(project, id)</code></td><td>One snapshot's key state.</td></tr>
+  <tr><td><code>snapshot_diff(project, a, b)</code></td><td>Tracked differences between two snapshots.</td></tr>
+  <tr><td><code>snapshot_timeline(project)</code></td><td>A Mermaid <code>gitGraph</code> of the history (paste into a markdown viewer to render).</td></tr>
+</table>
+
+<p>You can also read a snapshot's metadata directly via MCP resource:</p>
+
+<pre><code>snapshot://&lt;project&gt;/&lt;snap_id&gt;       # returns the JSON metadata</code></pre>
+
+<h2 id="branches">Branch, freeze, fork</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Effect</th></tr>
+  <tr><td><code>hx_snap_branch(project, snapshot, name)</code></td><td>Name a branch ref at a snapshot. Continuation happens by resuming with that branch name; the run lands on a new branch parented at that snapshot, keeping experiments off the main line.</td></tr>
+  <tr><td><code>hx_snap_freeze(project, snapshot, tag)</code></td><td>Tag a snapshot immutable for publication. The reference lives in <code>refs.json/tags</code>.</td></tr>
+  <tr><td><code>hx_snap_fork(project, name)</code></td><td>Export the full snapshot history (snaps + objects + index + refs) as <code>forks/&lt;name&gt;.tar.gz</code> — one self-contained, reproducible bundle.</td></tr>
+</table>
+
+<p>
+  A branch ref <em>names</em> a point; the branch comes to life when
+  you resume with it.
+</p>
+
+<h2 id="resume">Resume &amp; revert</h2>
+
+<p>Two complementary operations:</p>
+
+<table class="tools">
+  <tr><th>Tool</th><th>What it does</th></tr>
+  <tr>
+    <td><code>resume_pipeline(project, snapshot, at?, branch?, folder?)</code></td>
+    <td>Rebuild the snapshot's full state (artifact bytes from the
+      object store), re-enter the agent-driven loop at the snapshot's
+      stage by default (or <code>at=</code> any other stage), on
+      <code>branch=</code> a new branch if you want to fork the
+      experiment. <code>folder=</code> roots it at the project
+      regardless of the server's cwd. Returns the next stage's prompt
+      (or the done summary).
+    </td>
+  </tr>
+  <tr>
+    <td><code>snapshot_revert(project, snapshot)</code></td>
+    <td>The file-level checkout: write a snapshot's artifacts back to
+      disk and run nothing. Use to reproduce the on-disk state of an
+      old run without re-entering the loop.
+    </td>
+  </tr>
+</table>
+
+<div class="mermaid">
+flowchart LR
+  L[list_snapshots] --&gt; S[snapshot_show id=5]
+  S --&gt; D{decide}
+  D --inspect--&gt; X[diff snap-5 snap-7]
+  D --keep going--&gt; R[resume_pipeline branch='rppg-v2']
+  D --reproduce--&gt; V[snapshot_revert]
+  D --share--&gt; F[hx_snap_freeze 'v1' &amp; hx_snap_fork 'v1-public']
+</div>
+
+<p>
+  There is no separate <code>checkout</code>:
+  <code>resume_pipeline</code> covers branched continuation,
+  <code>snapshot_revert</code> covers tree restoration. Together they
+  cover both cases without a redundant destructive operation.
+</p>
+
+<h2 id="pause">Pauses</h2>
+
+<p>
+  A run that hits the token/call ceiling, has its gate prompt
+  declined, or loses the MCP client mid-run records a resumable
+  snapshot and stops rather than failing.
+  <code>hx_run_status</code> reports where it stopped;
+  <code>resume_pipeline</code>, or simply calling <code>hx_step</code>
+  again, continues it. See
+  <a href="gates.html#pauses">Gates → Pauses</a> for the full
+  list of pause causes and how they map to snapshots.
+</p>
+
+<h2 id="bundle">The fork bundle</h2>
+
+<p>
+  <code>hx_snap_fork(project, name)</code> packages
+  <code>.helix/snapshots/&lt;project&gt;/</code> in full:
+</p>
+
+<pre><code>forks/&lt;name&gt;.tar.gz
+└── snapshots/&lt;project&gt;/
+    ├── *.json
+    ├── index.json
+    ├── refs.json
+    └── objects/&lt;sha&gt;</code></pre>
+
+<p>
+  A collaborator extracts the bundle into
+  <code>.helix/</code>, points an MCP client at the project folder,
+  and runs <code>hx_run_status</code> / <code>snapshot_list</code> /
+  <code>resume_pipeline</code> to reproduce or continue the work — no
+  shared Atlas needed (every page citation references the
+  workspace-local Atlas, which the recipient may or may not have, but
+  the snapshot trail and artifacts are self-contained).
+</p>
+
+<p>
+  For a publication-ready handoff:
+</p>
+
+<ol>
+  <li><code>hx_atlas_lint</code> and resolve blockers.</li>
+  <li><code>hx_atlas_promote(ids, "published")</code> — confirms via
+    elicitation.</li>
+  <li><code>hx_snap_freeze(project, snapshot, tag)</code> — mark the
+    snapshot immutable so the bundle's content addresses won't drift.</li>
+  <li><code>hx_snap_fork(project, name)</code> — exports the bundle.
+    Share that one file.</li>
+</ol>
+
+<p>
+  Or invoke <code>helix_freeze</code> — the canonical MCP prompt — to
+  walk the same checklist interactively.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="atlas.html">← Atlas</a> &nbsp;·&nbsp;
+  <a href="mcp.html">MCP →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

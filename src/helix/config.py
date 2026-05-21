@@ -61,16 +61,79 @@ def use_root(path: str | Path | None):
 
 
 def project_root() -> Path:
-    """The helix project directory. A run binds it to its source folder
-    (:func:`use_root`); otherwise ``HELIX_HOME`` overrides the process cwd."""
+    """The helix *project* (run) directory — per-project operational state
+    (snapshots / runs / pending) lives here. A run binds it to its source
+    folder (:func:`use_root`); otherwise ``HELIX_HOME`` overrides the
+    process cwd. Distinct from :func:`workspace_root` (the shared,
+    cross-project Atlas root)."""
     bound = _RUN_ROOT.get()
     if bound is not None:
         return bound
     return Path(os.environ.get("HELIX_HOME", Path.cwd())).resolve()
 
 
+def _has_workspace_marker(d: Path) -> bool:
+    """A directory is a Helix workspace if it carries either a
+    ``.helix-workspace`` file (git-style) or a ``helix.toml`` with a
+    ``[workspace]`` section."""
+    if (d / ".helix-workspace").exists():
+        return True
+    toml = d / "helix.toml"
+    if not toml.exists():
+        return False
+    try:
+        with open(toml, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, ValueError):
+        return False
+    return "workspace" in data
+
+
+def workspace_root() -> Path:
+    """The shared *workspace* root — the cross-project knowledge base
+    (Atlas + Constitution) lives here. Resolution order:
+
+    1. explicit ``HELIX_ATLAS`` env, or absolute ``[atlas].path`` in the
+       project's ``helix.toml`` → that path's parent is the workspace.
+    2. nearest ancestor of :func:`project_root` carrying a workspace
+       marker (``helix.toml [workspace]`` or ``.helix-workspace``).
+    3. ``HELIX_HOME``.
+    4. :func:`project_root` (back-compat: when there is no workspace, the
+       project IS the workspace — the pre-Phase-1 model).
+    """
+    # 1. explicit atlas path → its parent
+    explicit = os.environ.get("HELIX_ATLAS")
+    if explicit:
+        ap = Path(explicit).expanduser().resolve()
+        return ap.parent if ap.name == "atlas" else ap
+    cfg_path = load_helix_toml().get("atlas", {}).get("path")
+    if cfg_path:
+        p = Path(cfg_path).expanduser()
+        if p.is_absolute():
+            p = p.resolve()
+            return p.parent if p.name == "atlas" else p
+    # 2. ancestor walk-up for a workspace marker
+    cur = project_root()
+    while True:
+        if _has_workspace_marker(cur):
+            return cur
+        parent = cur.parent
+        if parent == cur:  # filesystem root
+            break
+        cur = parent
+    # 3. HELIX_HOME fallback
+    env = os.environ.get("HELIX_HOME")
+    if env:
+        return Path(env).expanduser().resolve()
+    # 4. back-compat: project is the workspace
+    return project_root()
+
+
 def helix_dir() -> Path:
-    """``.helix/`` — snapshots, objects, refs, env. Created on demand."""
+    """``.helix/`` — per-project operational state (snapshots, objects,
+    refs, env). Resolves against the *project* root (under
+    :func:`use_root` when a run is active), NOT the workspace root, so the
+    self-rooting safety holds. Created on demand."""
     d = project_root() / ".helix"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -100,11 +163,15 @@ def load_helix_toml() -> dict:
 
 
 def atlas_path() -> Path:
-    """Atlas root. ``helix.toml [atlas].path`` or repo-local ``./atlas``."""
+    """Atlas root — *workspace-rooted*, not project-rooted. The Atlas is the
+    cross-project knowledge base; per-project operational state lives under
+    :func:`helix_dir`. Resolution: ``HELIX_ATLAS`` env, or ``[atlas].path``
+    from ``helix.toml`` (absolute or workspace-relative), or default
+    ``workspace_root()/atlas``."""
     cfg = load_helix_toml().get("atlas", {})
     raw = os.environ.get("HELIX_ATLAS") or cfg.get("path") or "atlas"
-    p = Path(raw)
-    return p if p.is_absolute() else project_root() / p
+    p = Path(raw).expanduser()
+    return p.resolve() if p.is_absolute() else workspace_root() / p
 
 
 def token_cap() -> int:

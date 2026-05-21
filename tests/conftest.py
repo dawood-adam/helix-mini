@@ -34,7 +34,7 @@ FAKE = {
             {"path": "sources/paper.md", "title": "Paper", "content": "c", "summary": "s"}
         ],
     }, 0.01),
-    "methods critic": ({
+    "Scout Critic": ({
         "critiques": [{"approach_id": "approach-1", "strengths": "x",
                        "weaknesses": "y", "severity": "info", "recommendation": "go"}],
         "recommended_id": "approach-1", "atlas_writes": [],

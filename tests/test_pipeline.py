@@ -13,7 +13,7 @@ def test_full_run_loop(project, fake_llm):
     assert r.error is None
     assert r.verdict == "ship"
     assert r.completed_stages[:5] == [
-        "scout", "critic_methods", "planner", "builder", "validator",
+        "scout", "scout_critic", "planner", "builder", "validator",
     ]
     assert "critic_results" in r.completed_stages
     assert r.tokens_used > 0

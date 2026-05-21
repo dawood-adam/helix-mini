@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quickstart · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>quickstart</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html" class="active">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+      <a href="mcp.html">MCP</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#prereqs">Prerequisites</a></li>
+    <li><a href="#install">Install</a></li>
+    <li><a href="#workspace">Scaffold a workspace</a></li>
+    <li><a href="#project">Create a project</a></li>
+    <li><a href="#first-run">First run</a></li>
+    <li><a href="#what-happens">What happens at a gate</a></li>
+    <li><a href="#next">Next steps</a></li>
+  </ol>
+  <h4 style="margin-top:18px;">See also</h4>
+  <ol>
+    <li><a href="usage.html">Full usage guide</a></li>
+    <li><a href="forge.html">Forge — pipeline</a></li>
+    <li><a href="gates.html">Gates &amp; control</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Quickstart</h1>
+<p class="lede">From <code>pip install</code> to a paused pipeline gate in five minutes.</p>
+
+<h2 id="prereqs">Prerequisites</h2>
+<ul>
+  <li><strong>Python ≥ 3.11.</strong></li>
+  <li><strong>An MCP client</strong> whose agent drives the tool loop and
+    supports MCP <em>elicitation</em> for gates. Today that is
+    <a href="https://docs.claude.com/en/docs/agents-and-tools/claude-code">Claude Code</a>.</li>
+  <li>No API keys. No model configuration. The agent is the model.</li>
+</ul>
+
+<h2 id="install">Install</h2>
+
+<pre><code>pip install -e .                 # core (click · pyyaml · mcp · anyio · python-dotenv)
+pip install -e '.[dev]'          # + pytest
+pip install -e '.[embed,pdf]'    # optional: semantic recall + PDF ingest</code></pre>
+
+<p>
+  Helix declares no dependency on an LLM SDK. The two optional extras are
+  <code>fastembed</code> (local embedding model for semantic Atlas recall)
+  and <code>pymupdf</code> (PDF text extraction during ingest). Skip them
+  to keep the install minimal.
+</p>
+
+<h2 id="workspace">Scaffold a workspace</h2>
+
+<p>
+  Helix is organised as <strong>one workspace, many projects</strong>.
+  The workspace owns the shared Atlas (cross-project knowledge base);
+  projects live as subfolders. Run <code>helix init</code> <em>once</em>
+  per workspace; <code>helix new &lt;project&gt;</code> per project.
+</p>
+
+<pre><code>mkdir my-research &amp;&amp; cd my-research
+helix init
+# Workspace ready: /Users/you/my-research
+#   Atlas at: atlas/
+#   Next:     helix new &lt;project-name&gt;</code></pre>
+
+<p>This writes:</p>
+
+<table>
+  <tr><th>File</th><th>Purpose</th></tr>
+  <tr><td><code>helix.toml</code></td><td>Workspace marker (<code>[workspace]</code>) + Atlas path (<code>[atlas]</code>).</td></tr>
+  <tr><td><code>.mcp.json</code></td><td>Registers the helix MCP server, pinned to the interpreter that <code>helix init</code> ran in.</td></tr>
+  <tr><td><code>constitution.md</code></td><td>Non-negotiables every agent reads (language / framework / testing / style / "done"). Edit it.</td></tr>
+  <tr><td><code>AGENTS.md</code></td><td>Recommended Claude Code skills (graceful — use if installed).</td></tr>
+  <tr><td><code>atlas/</code></td><td>The shared Atlas tree: <code>inbox/</code>, <code>raw/</code>, <code>sources/</code>, <code>concepts/</code> (incl. <code>glossary/</code>, <code>methods/</code>, <code>contradictions/</code>), <code>entities/</code> (incl. <code>datasets/</code>), <code>projects/</code>.</td></tr>
+  <tr><td><code>README.md</code></td><td>Workspace README explaining the layout.</td></tr>
+</table>
+
+<h2 id="project">Create a project</h2>
+
+<pre><code>helix new bp-from-rppg
+cd bp-from-rppg
+# Project ready: /Users/you/my-research/bp-from-rppg
+#   1. Edit  bp-from-rppg/question.md
+#   2. Add   source files to bp-from-rppg/
+#   3. cd    bp-from-rppg  &amp;&amp; open in Claude Code, then: start helix</code></pre>
+
+<p>This writes, inside the project folder:</p>
+
+<table>
+  <tr><th>File</th><th>Purpose</th></tr>
+  <tr><td><code>question.md</code></td><td>Your research brief. Edit it before the first run.</td></tr>
+  <tr><td><code>helix.toml</code></td><td>Per-project <code>[limits]</code> (<code>token_cap</code>, <code>call_cap</code>).</td></tr>
+  <tr><td><code>.mcp.json</code></td><td>So Claude Code finds the server when it opens this folder.</td></tr>
+  <tr><td><code>CLAUDE.md</code></td><td>Instructions the agent reads on <em>"start helix"</em>.</td></tr>
+</table>
+
+<p>
+  Add your source material (PDFs, papers, code, data) into this folder
+  — anywhere. Or drop it into <code>../atlas/inbox/</code> for managed
+  ingestion via <code>hx_atlas_ingest</code>.
+</p>
+
+<h2 id="first-run">First run</h2>
+
+<p>
+  Open the project folder in Claude Code. It launches the MCP server
+  automatically (via <code>.mcp.json</code>). Then talk in plain
+  language. The client calls Helix's tools; the agent answers each
+  stage's prompt; the run advances.
+</p>
+
+<pre><code>you&gt;   start helix
+helix&gt; What should we call this project?  (lowercase / digits / hyphens)
+you&gt;   bp-from-rppg
+helix&gt; One-sentence research question / description?
+you&gt;   Cuffless BP from smartphone rPPG video.
+helix&gt; How should it run?
+       1 step-by-step (ask at every gate)
+       2 auto up to a stage, then ask
+       3 fully autonomous
+you&gt;   1
+helix&gt; Source folder to ingest (path)
+you&gt;   ./papers
+helix&gt; Started 'bp-from-rppg' (step-by-step).
+       NEEDS MODEL — project 'bp-from-rppg', stage 'scout'.
+       You are the model for this stage. Read SYSTEM + USER below, then …</code></pre>
+
+<p>
+  What you've just seen is the <code>hx_start</code> wizard handing
+  off to <code>hx_step</code>. The agent now reads the Scout prompt,
+  produces the JSON the contract requires, and calls
+  <code>hx_submit</code> — and the run advances to the next gate.
+</p>
+
+<h2 id="what-happens">What happens at a gate</h2>
+
+<p>The full step → submit → gate → transition cycle:</p>
+
+<div class="mermaid">
+sequenceDiagram
+  participant U as You
+  participant A as Agent (Claude Code)
+  participant H as helix-mcp
+  participant C as core (loop · stages · gates)
+  U-&gt;&gt;A: start helix
+  A-&gt;&gt;H: hx_start(folder)
+  H-&gt;&gt;U: elicit name / question / mode / sources
+  U--&gt;&gt;H: answers
+  H-&gt;&gt;C: loop.advance — render Scout prompt
+  C--&gt;&gt;H: NEEDS MODEL (Scout SYSTEM + USER)
+  H--&gt;&gt;A: tool result: prompt + pending_token
+  A-&gt;&gt;A: reason, produce Scout JSON
+  A-&gt;&gt;H: hx_submit(stage='scout', result_json, pending_token)
+  H-&gt;&gt;C: inject answer · sanitize_atlas_writes · Atlas write · snapshot
+  C-&gt;&gt;H: gate decision needed
+  H-&gt;&gt;U: elicit — proceed / send back / stop?
+  U--&gt;&gt;H: proceed
+  H-&gt;&gt;C: transition → next stage (Scout Critic)
+  H--&gt;&gt;A: NEEDS MODEL: scout_critic prompt
+</div>
+
+<p>
+  At a gate you can:
+</p>
+
+<ul>
+  <li><strong>proceed</strong> — go to the next stage in order.</li>
+  <li><strong>send back</strong> — pick any earlier stage and write a
+    directive; the directive is threaded into that stage when it
+    re-runs.</li>
+  <li><strong>stop</strong> — pause the run resumably.</li>
+</ul>
+
+<p>
+  Every transition (including a send-back) is a snapshot. The run is
+  resumable from any of them. Read the
+  <a href="gates.html">Gates &amp; control</a> doc for the Plan, autonomy
+  modes (<code>auto_until</code>, <code>rediscover</code>), and how
+  deterministic routing (Validator hard miss, Results-Critic
+  <code>iterate</code>) interacts with HITL.
+</p>
+
+<h2 id="next">Next steps</h2>
+
+<ul>
+  <li>Drop a PDF in <code>atlas/inbox/</code> and ask Claude Code to
+    <em>"process my inbox"</em>. It runs <code>hx_atlas_ingest</code>
+    — idempotent, sha256-keyed; the original moves to
+    <code>atlas/raw/</code> and a typed source page lands under
+    <code>atlas/sources/</code>.</li>
+  <li>Ask <em>"what do we know about X?"</em>. The agent calls
+    <code>hx_atlas_recall</code> — auto-routing across lexical, semantic,
+    graph, and community modes — and surfaces references only (bodies
+    fetched on demand).</li>
+  <li>After a few runs, ask <em>"health-check the atlas"</em>. Helix
+    runs the 11-check linter (orphans, contradictions, stale,
+    vocabulary drift, dataset-without-license, discovery-log, …) and
+    suggests a fix for each issue. See
+    <a href="atlas.html#lint">Atlas → Lint</a>.</li>
+  <li>To resume after a break, ask <em>"where were we?"</em>. The agent
+    reads the <code>hot://&lt;project&gt;</code> resource — a one-page
+    cache of current head, summary, open questions, and live branches.</li>
+</ul>
+
+<p>
+  Continue to the <a href="usage.html">Usage guide</a> for the day-to-day
+  workflow, or the <a href="forge.html">Forge</a> doc to read about each
+  stage in detail.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="index.html">← Docs home</a> &nbsp;·&nbsp;
+  <a href="usage.html">Usage guide →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

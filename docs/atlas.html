@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Atlas — the wiki · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>atlas — the wiki</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="gates.html">Gates</a>
+      <a href="atlas.html" class="active">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#layout">Layout</a></li>
+    <li><a href="#page-schema">Page schema</a></li>
+    <li><a href="#write-protocol">Write protocol</a></li>
+    <li><a href="#ingest">Ingest</a></li>
+    <li><a href="#graph">The graph</a></li>
+    <li><a href="#recall">Recall &amp; get</a></li>
+    <li><a href="#threads">Threads</a></li>
+    <li><a href="#glossary">Glossary &amp; ubiquitous language</a></li>
+    <li><a href="#datasets">Datasets as a first-class thread</a></li>
+    <li><a href="#lint">Lint</a></li>
+    <li><a href="#hot">Hot cache</a></li>
+    <li><a href="#promote">Promote, propose, reconcile</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Atlas — the wiki</h1>
+<p class="lede">The LLM-maintained research memory. Markdown on disk; typed; greppable; git-friendly; cross-project.</p>
+
+<h2 id="layout">Layout</h2>
+
+<pre><code>&lt;workspace&gt;/atlas/
+├── ATLAS.md                 the schema, in plain English (the only config agents read)
+├── index.md                 one line per page
+├── log.md                   chronological write log
+├── inbox/                   drop zone + .manifest.json
+├── raw/                     ingested originals (immutable)
+├── sources/                 type: source pages
+├── concepts/                type: concept pages
+│   ├── contradictions/
+│   ├── methods/
+│   └── glossary/            workspace-shared ubiquitous language
+├── entities/
+│   └── datasets/            data thread anchors (E)
+└── projects/&lt;id&gt;/
+    ├── spec.md              project spec (B + F.2/F.3)
+    ├── plan.md              validation plan
+    ├── threads/             longitudinal artifacts (E)
+    │   ├── hypothesis.md  data.md  design.md  code-org.md  glossary.md
+    ├── reports/&lt;stage&gt;.html self-contained HTML reports (D)
+    ├── syntheses/&lt;slug&gt;.md  via hx_atlas_save
+    ├── decisions.md         the decision log
+    └── _hot.md              session working state (regen at run end)
+</code></pre>
+
+<p>
+  The whole tree is markdown + YAML. <code>ATLAS.md</code> documents the
+  schema in plain English and is the only configuration the agents read —
+  edit it to change conventions.
+</p>
+
+<h2 id="page-schema">Page schema</h2>
+
+<p>Every page is markdown with a YAML frontmatter header:</p>
+
+<pre><code>---
+id: atlas:concepts:rppg              # derived from the path
+type: concept                        # concept | entity | source | method | finding | comparison
+tier: canonical                      # scratch | active | canonical | published | archived
+aliases: [rPPG, "remote photoplethysmography"]   # ≥ 1, mandatory
+created_at:        2026-04-12T11:08:00+00:00
+updated_at:        2026-05-19T15:42:00+00:00
+claim_valid_at:    2026-04-12T11:08:00+00:00     # when the strongest claim was made
+last_verified_at:  2026-05-19T15:42:00+00:00     # when reconciled against sources
+provenance:
+  stage: scout
+  run_id: run_4a2c1f
+  snapshot_id: "7"
+  sources: [sources/lazzaro-2024.md]
+links:
+  derived_from: []
+  related_to:   [atlas:concepts:ppg]
+  contradicts:  []
+  cites:        [atlas:sources:lazzaro-2024]
+embeddings:
+  model: BAAI/bge-small-en
+  hash:  3f1c…
+spec_refs: [spec:0001:G.1]            # which spec line this write supports
+history:                              # short audit trail (capped at 20)
+  - {at: 2026-04-12T…, action: ADD, because: "first cut from Scout", run_id: run_4a2c1f}
+  - {at: 2026-05-19T…, action: UPDATE, because: "added Lazzaro 2024", run_id: run_7e91d2}
+---
+
+# rPPG
+
+[free-form body]</code></pre>
+
+<p>Three details matter:</p>
+
+<ul>
+  <li><strong>Tiers</strong> are a maturity ladder.
+    <em>scratch</em> → <em>active</em> → <em>canonical</em> →
+    <em>published</em> → <em>archived</em>. A scratch note is not a
+    published finding; <code>hx_atlas_promote</code> moves a page up
+    and confirms at canonical / published.</li>
+  <li><strong>Aliases</strong> (≥ 1, enforced) drive duplicate
+    detection across abbreviations and spellings. If an agent omits
+    them, the title is used as the default — which the linter then
+    flags as <em>un-aliased</em>.</li>
+  <li>The <strong>bi-temporal pair</strong>
+    (<code>claim_valid_at</code> + <code>last_verified_at</code>) is
+    what makes "stale" a fact rather than a guess.</li>
+</ul>
+
+<p>
+  Writes are backward-tolerant: an agent may emit just
+  <code>{path, title, content, summary}</code> and the store fills
+  sensible defaults — the schema never blocks a run. All writes pass
+  the sandbox first.
+</p>
+
+<h2 id="write-protocol">Write protocol</h2>
+
+<p>
+  Every Atlas write declares <em>what</em> it is doing, <em>why</em>,
+  <em>where it came from</em>, and <em>which spec line it supports</em>.
+  This is the Workstream-G contract (mem0 / Letta / Graphiti shape,
+  adapted to research):
+</p>
+
+<table>
+  <tr><th>Field</th><th>Required</th><th>What</th></tr>
+  <tr><td><code>path</code></td><td>yes</td><td>Atlas-relative, must start with <code>sources/</code> / <code>concepts/</code> / <code>entities/</code> / <code>projects/</code>.</td></tr>
+  <tr><td><code>title</code></td><td>yes</td><td>Page title (control-stripped, length-capped).</td></tr>
+  <tr><td><code>content</code></td><td>yes</td><td>Markdown body (size-capped + size-truncated).</td></tr>
+  <tr><td><code>summary</code></td><td>yes</td><td>One-line index entry shown in <code>atlas/index.md</code>.</td></tr>
+  <tr><td><code>action</code></td><td>recommended</td><td>One of <strong>ADD · UPDATE · SUPERSEDE · LINK · NOOP</strong>. Missing → defaults to ADD with a "agent-emitted (no action declared)" rationale + a warning.</td></tr>
+  <tr><td><code>because</code></td><td>recommended</td><td>A one-line rationale for the write. Read at the gate.</td></tr>
+  <tr><td><code>provenance</code></td><td>recommended</td><td>A small dict; the sandbox whitelists <code>{stage, run_id, snapshot_id, confidence, sources}</code>.</td></tr>
+  <tr><td><code>spec_refs</code></td><td>recommended</td><td>List of spec-line ids this write supports / contradicts / extends. Read by the <em>orphan-by-policy</em> lint.</td></tr>
+  <tr><td><code>type</code> / <code>tier</code> / <code>aliases</code> / <code>links</code></td><td>optional</td><td>Override the defaults inferred from the path. The frontmatter sanitiser normalises lists and strips control chars.</td></tr>
+</table>
+
+<p>
+  <code>Atlas.write</code> persists <code>spec_refs</code> on the page
+  itself and appends a per-write entry to a short <code>history</code>
+  array (capped at 20) so a page carries its own audit trail across
+  iterations. The Atlas <code>log.md</code> records every batch with
+  the caller-supplied message
+  (e.g. <code>scout | bp-from-rppg</code>).
+</p>
+
+<div class="note tip">
+  <h5>Pre-flight dedup with <code>hx_atlas_propose</code></h5>
+  Before an ADD, the agent can call
+  <code>hx_atlas_propose(write_json)</code>. It runs the sandbox to
+  preview rejections, runs <code>recall</code> on the title + aliases,
+  and either returns <em>"ok: no near duplicates"</em> or a DEDUP
+  warning with the near-matching page(s) and a suggestion to switch the
+  action to UPDATE / SUPERSEDE / LINK. The tool does <em>not</em> write
+  — it is the dedup gate the agent runs <em>before</em> committing.
+</div>
+
+<h2 id="ingest">Ingest</h2>
+
+<p>
+  Drop files (PDF, markdown, text, code, data) into
+  <code>atlas/inbox/</code> and run <code>hx_atlas_ingest</code> — the
+  whole inbox, or one file by path.
+</p>
+
+<div class="mermaid">
+flowchart LR
+  D[atlas/inbox/file.pdf] --&gt; H{sha256 in .manifest.json?}
+  H --yes--&gt; SKIP[skip · already ingested]
+  H --no--&gt; X[extract text · pymupdf for PDFs]
+  X --&gt; W[Atlas.write → sources/&lt;slug&gt;.md]
+  W --&gt; M[move original → atlas/raw/]
+  W --&gt; U[update .manifest.json]
+</div>
+
+<p>
+  A <code>.manifest.json</code> records each file's sha256, so
+  re-running is idempotent and a changed file is re-ingested. Each new
+  file becomes a <code>type: source</code> page; the original moves to
+  <code>atlas/raw/</code>, keeping the inbox a clean drop zone.
+  Symlinks pointing outside the inbox are rejected by
+  <code>sandbox.validate_ingest_source</code>.
+</p>
+
+<h2 id="graph">The graph</h2>
+
+<p>Page <code>links:</code> form a three-level structure:</p>
+
+<ul>
+  <li><strong>Episodes</strong> — the immutable sources in
+    <code>raw/</code>.</li>
+  <li><strong>Entities</strong> — the pages, with typed edges declared
+    in frontmatter (<code>derived_from · related_to · contradicts ·
+    cites</code>).</li>
+  <li><strong>Communities</strong> — thematic clusters, computed on
+    demand by label propagation; not stored.</li>
+</ul>
+
+<p>
+  The markdown is the source of truth. <code>atlas_index.build</code>
+  materialises the edges into an in-memory SQLite graph, rebuilt per
+  query (milliseconds at this scale), so <code>Atlas.write</code>
+  carries no index cost. <code>hx_atlas_neighbors(page, k)</code>
+  returns the k-hop neighbourhood of a page.
+</p>
+
+<h2 id="recall">Recall &amp; get</h2>
+
+<p>
+  <code>hx_atlas_recall</code> is one entry point with a query-shape
+  router. It returns <em>references only</em> — id, title, tier,
+  ~120-char summary, score, mode — never bodies. Bodies come from
+  <code>hx_atlas_get</code> and are capped (<code>24KB</code>). The
+  find/fetch split protects the model's context budget.
+</p>
+
+<table>
+  <tr><th>Query shape</th><th>Mode</th><th>Method</th></tr>
+  <tr><td>an id or path</td><td>graph</td><td>k-hop traversal from that node</td></tr>
+  <tr><td>"everything / overview about X"</td><td>community</td><td>the cluster around the best hit</td></tr>
+  <tr><td>relational ("how does X relate to Y")</td><td>graph</td><td>seeded from the best lexical hit</td></tr>
+  <tr><td>five or more words</td><td>semantic</td><td>cosine on local embeddings</td></tr>
+  <tr><td>short, specific</td><td>lexical</td><td>BM25</td></tr>
+</table>
+
+<p>
+  If a richer mode cannot run (no embeddings, no resolvable graph
+  node), recall falls back to lexical — it never hard-fails. Semantic
+  mode needs vectors; the optional <code>fastembed</code> extra
+  provides a local model. Without it, semantic queries fall back to
+  lexical. Vectors are cached in <code>.helix/embeddings.json</code>,
+  keyed by body sha256.
+</p>
+
+<h2 id="threads">Threads</h2>
+
+<p>
+  A <strong>thread</strong> is a longitudinal artifact that spans the
+  pipeline. Each thread lives at a known Atlas path with a tiny
+  frontmatter and a markdown body containing one
+  <code>## snap-&lt;id&gt;</code> section per stage transition. The
+  status machine is <em>Proposed → Accepted → Superseded</em>; the
+  reader supports bi-temporal queries.
+</p>
+
+<table>
+  <tr><th>Thread</th><th>First created by</th><th>Updated by</th><th>Atlas path</th></tr>
+  <tr><td><strong>hypothesis</strong></td><td>Scout (Frame)</td><td>Scout, Scout Critic, Results Critic</td><td><code>projects/&lt;id&gt;/threads/hypothesis.md</code></td></tr>
+  <tr><td><strong>data</strong></td><td>Scout (data sub-phase)</td><td>Planner, Builder, Validator</td><td><code>projects/&lt;id&gt;/threads/data.md</code> + <code>entities/datasets/&lt;slug&gt;.md</code></td></tr>
+  <tr><td><strong>spec</strong></td><td>Scout (final sub-phase)</td><td>every stage on send-back</td><td><code>projects/&lt;id&gt;/spec.md</code></td></tr>
+  <tr><td><strong>plan</strong></td><td>Planner</td><td>Planner (revisions), Builder</td><td><code>projects/&lt;id&gt;/plan.md</code></td></tr>
+  <tr><td><strong>design</strong></td><td>Planner / Builder</td><td>Builder, Results Critic</td><td><code>projects/&lt;id&gt;/threads/design.md</code></td></tr>
+  <tr><td><strong>code-org</strong></td><td>Builder</td><td>Builder (refactors)</td><td><code>projects/&lt;id&gt;/threads/code-org.md</code></td></tr>
+  <tr><td><strong>glossary</strong></td><td>Scout (lit dive)</td><td>every stage</td><td><code>projects/&lt;id&gt;/threads/glossary.md</code> + <code>concepts/glossary/&lt;term&gt;.md</code></td></tr>
+</table>
+
+<p>Read the current state of a thread via the MCP resource:</p>
+
+<pre><code>thread://&lt;project&gt;/&lt;name&gt;                  # current state
+thread-at://&lt;project&gt;/&lt;name&gt;/&lt;snap_id&gt;    # bi-temporal — state at that snapshot</code></pre>
+
+<p>
+  Under the hood, <code>threads.append_update(atlas_root, project,
+  name, snapshot_id, body, status?, contributor?)</code> is idempotent
+  on <code>snapshot_id</code>: a second call with the same id
+  <em>replaces</em> the section in place rather than duplicating — so
+  a send-back re-run cleanly overwrites the previous attempt.
+  <code>threads.read_at</code> truncates the body to up-to-and-
+  including the matching <code>## snap-&lt;id&gt;</code> section.
+</p>
+
+<h2 id="glossary">Glossary &amp; ubiquitous language</h2>
+
+<p>
+  Domain-Driven Design's <em>Ubiquitous Language</em>, realised as a
+  thread: one term per <code>### &lt;term&gt;</code> heading in the
+  glossary thread, with a one-sentence definition. Workspace-shared
+  terms live at <code>atlas/concepts/glossary/&lt;term&gt;.md</code>.
+</p>
+
+<p>
+  Scout seeds the glossary from the literature dive. Every later
+  stage's prompt includes it. The lint check
+  <em>vocabulary-drift</em> flags boldface terms (<code>**term**</code>)
+  used in the project's <code>spec.md</code> / <code>plan.md</code> that
+  aren't defined in the glossary — a one-click suggestion to either add
+  the term or rename to an existing one.
+</p>
+
+<h2 id="datasets">Datasets as a first-class thread</h2>
+
+<p>
+  In most agentic-research systems datasets are treated as fixed
+  inputs. For computational research that is a hole. Helix makes data
+  a first-class artifact, tied to the <code>data</code> thread, with
+  per-stage instructions:
+</p>
+
+<table>
+  <tr><th>Stage</th><th>Data-aware sub-instruction</th></tr>
+  <tr><td>Scout</td><td><strong>Data scout</strong>: identify candidate datasets; record each as <code>entities/datasets/&lt;slug&gt;.md</code> with <code>{source, license, size, format, access, suitability, limitations}</code>.</td></tr>
+  <tr><td>Scout Critic</td><td>Critique data choice vs. the question; flag unsuitable datasets in the overlay.</td></tr>
+  <tr><td>Planner</td><td><strong>Data plan</strong>: which datasets, preprocessing, splits, ground-truth, validation bands tied to data.</td></tr>
+  <tr><td>Builder</td><td><strong>Data build</strong>: scripts that fetch / transform / version the data; partial datasets are snapshots on the data thread.</td></tr>
+  <tr><td>Validator</td><td>Deterministic checks against the data spec (schema, splits respected, bands met).</td></tr>
+  <tr><td>Results Critic</td><td>Generalization, leakage, fairness checks tied to the data thread.</td></tr>
+</table>
+
+<p>
+  Two lint checks back this up:
+  <em>dataset-without-license</em> and <em>dataset-without-source</em>
+  fire when a <code>entities/datasets/*.md</code> page omits the
+  field in its frontmatter — reproducibility and reuse are auditable
+  at a glance.
+</p>
+
+<h2 id="lint">Lint</h2>
+
+<p>
+  <code>hx_atlas_lint</code> is the hygiene sweep. Each check is exact
+  or a cheap heuristic, never fuzzy, so the output is trustworthy. The
+  current set:
+</p>
+
+<table>
+  <tr><th>Kind</th><th>Triggers when</th></tr>
+  <tr><td><code>orphan</code></td><td>A page nothing links to and that links nowhere (and isn't published / archived).</td></tr>
+  <tr><td><code>contradiction</code></td><td>An explicit <code>contradicts</code> edge between two pages.</td></tr>
+  <tr><td><code>stale</code></td><td><code>last_verified_at</code> overdue (> 30 days); counts newer sources since.</td></tr>
+  <tr><td><code>missing-page</code></td><td>An internal link pointing at a page that doesn't exist.</td></tr>
+  <tr><td><code>unaliased</code></td><td>Only the auto-default alias (the title).</td></tr>
+  <tr><td><code>orphan-community</code></td><td>A cluster of ≥ 3 with no synthesis / comparison page.</td></tr>
+  <tr><td><code>stale-report</code></td><td>A non-canonical report filename under <code>projects/&lt;id&gt;/reports/</code>.</td></tr>
+  <tr><td><code>orphan-by-policy</code></td><td>A page touched by the write protocol (has a <code>history</code> entry) but lists no <code>spec_refs</code>.</td></tr>
+  <tr><td><code>dataset-without-license</code></td><td>A page under <code>entities/datasets/</code> with no <code>license</code> field.</td></tr>
+  <tr><td><code>dataset-without-source</code></td><td>Same, no <code>source</code> field.</td></tr>
+  <tr><td><code>vocabulary-drift</code></td><td>A boldface term in <code>spec.md</code> / <code>plan.md</code> not defined in the project glossary.</td></tr>
+  <tr><td><code>discovery-log</code></td><td>A hypothesis marked <code>Supported</code> in the hypothesis thread with no <code>support:</code> citations.</td></tr>
+</table>
+
+<p>
+  Each issue carries a suggested fix.
+  <code>hx_atlas_reconcile</code> is the periodic sweep: it runs lint,
+  groups findings by kind, and additionally surfaces
+  <em>promotion candidates</em> (active pages with ≥ 3 inbound edges)
+  for human review.
+</p>
+
+<h2 id="hot">Hot cache</h2>
+
+<p>
+  At the end of a run, <code>atlas/projects/&lt;id&gt;/_hot.md</code>
+  is regenerated from the snapshot trail (zero-LLM — it reuses the
+  last Decision Card): current head, summary, open questions, the
+  directive for the next stage, recently touched stages, and live
+  branches. It is a <em>cache</em> overwritten each run, distinct from
+  the append-only snapshot history.
+</p>
+
+<p>
+  Read the <code>hot://&lt;project&gt;</code> MCP resource first when
+  resuming. The agent treats it as the "where were we?" answer.
+</p>
+
+<h2 id="promote">Promote, propose, reconcile</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Effect</th></tr>
+  <tr><td><code>hx_atlas_put(path, title, content, summary, type?, tier?, aliases_csv?)</code></td><td>Create / update a page; writing the same path merges and preserves the creation clock.</td></tr>
+  <tr><td><code>hx_atlas_save(title, content, type?, project?, tier?)</code></td><td>File a synthesis / comparison answer as a proper page.</td></tr>
+  <tr><td><code>hx_atlas_promote(ids, tier)</code></td><td>Bump pages up the tier ladder. Promotion to canonical / published elicits a confirmation.</td></tr>
+  <tr><td><code>hx_atlas_propose(write_json)</code></td><td>Pre-flight an ADD: sandbox + dedup gate, no write. Recommends action switch on a near-duplicate hit.</td></tr>
+  <tr><td><code>hx_atlas_reconcile()</code></td><td>Periodic sweep — runs lint by kind, surfaces promotion candidates, advisory only.</td></tr>
+</table>
+
+<p>
+  <code>ATLAS.md</code> documents the schema in plain English. It is
+  the only configuration the agents read; edit it to change
+  conventions (then the next run's agents pick up your edits in their
+  system prompts via the workspace constitution).
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="gates.html">← Gates</a> &nbsp;·&nbsp;
+  <a href="snapshots.html">Snapshots →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MCP surface · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>MCP surface</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="gates.html">Gates</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+      <a href="mcp.html" class="active">MCP</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#connection">Connection</a></li>
+    <li><a href="#agent-driven">Agent-driven (no sampling)</a></li>
+    <li><a href="#tools-pipeline">Tools — pipeline</a></li>
+    <li><a href="#tools-spec">Tools — spec / clarify / ask</a></li>
+    <li><a href="#tools-atlas">Tools — atlas</a></li>
+    <li><a href="#tools-snapshots">Tools — snapshots</a></li>
+    <li><a href="#tools-reports">Tools — reports / constitution</a></li>
+    <li><a href="#tools-runs">Tools — run observability</a></li>
+    <li><a href="#resources">Resources</a></li>
+    <li><a href="#prompts">Prompts</a></li>
+    <li><a href="#safety">Safety posture</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>The MCP surface</h1>
+<p class="lede">One stdio MCP server (FastMCP). The client launches it via <code>.mcp.json</code>; there is no network service and no credential configuration.</p>
+
+<h2 id="connection">Connection</h2>
+
+<p>
+  <code>helix init</code> writes a server pinned to the interpreter
+  Helix is installed in (<code>sys.executable</code> of the process
+  running <code>helix init</code>):
+</p>
+
+<pre><code>{ "mcpServers": { "helix": {
+  "command": "/abs/path/to/python",
+  "args":    ["-m", "helix.mcp.server"]
+} } }</code></pre>
+
+<p>
+  This is deliberate: the client resolves a bare <code>command</code>
+  against its own <code>PATH</code>, which need not include the
+  environment's <code>bin/</code>. Absolute interpreter +
+  <code>-m helix.mcp.server</code> is PATH-independent and portable.
+  <code>helix-mcp</code> (console entry point
+  <code>helix.mcp.server:main</code>) and <code>helix mcp</code> run
+  the same server by hand for debugging.
+</p>
+
+<h2 id="agent-driven">Agent-driven (no sampling)</h2>
+
+<p>
+  Helix has no model of its own and stores no credentials.
+  <strong>The client agent is the model.</strong> A model-needing
+  stage does not sample: <code>hx_step</code> returns the stage's
+  prompt as its tool output; the agent answers in its own turn; and
+  <code>hx_submit</code> feeds that answer back in. See
+  <a href="architecture-technical.html#agent-driven">Technical
+  architecture → Agent-driven</a> for the responder seam.
+</p>
+
+<p>
+  The one remaining server→client callback — through the single seam
+  in <code>helix/io.py</code> — is <strong>elicitation</strong>:
+  structured questions to the user mid-tool (the <code>hx_start</code>
+  wizard, every HITL gate, the <code>hx_clarify</code> walk, the
+  <code>hx_ask</code> tool, confirmation before promoting to a
+  published tier). Schemas are flat (string / enum / boolean / array),
+  built by <code>ask_text</code> / <code>ask_choice</code> /
+  <code>ask_multi</code> / <code>ask_confirm</code>. A client without
+  elicitation cannot run gated tools, and fails fast with a clear
+  message before any run starts (<code>_missing_client_caps</code>
+  pre-flight).
+</p>
+
+<h2 id="tools-pipeline">Tools — pipeline</h2>
+
+<p>
+  The pipeline is agent-driven: <code>hx_step</code> returns a stage's
+  prompt; the agent answers; <code>hx_submit</code> advances.
+  <code>run_pipeline</code> and <code>hx_start</code> are
+  initialisers that return the <em>first</em> <code>hx_step</code>.
+</p>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>hx_step(folder, question?, autonomy_until?)</code></td><td>Advance to the next stage that needs the model; returns its SYSTEM + USER prompt for the agent (or the final summary). First call initialises the run.</td></tr>
+  <tr><td><code>hx_submit(folder, stage, result_json, pending_token)</code></td><td>Submit the agent's JSON answer for the pending stage; maps it, writes the Atlas, snapshots, runs the gate, and returns the next prompt. Guarded by <code>pending_token</code>.</td></tr>
+  <tr><td><code>hx_start(folder?)</code></td><td>Guided setup wizard; creates the source folder if missing, then starts the run and returns the first stage's prompt.</td></tr>
+  <tr><td><code>run_pipeline(folder, question?, autonomy_until?)</code></td><td>Start a run on a folder and return the first stage's prompt. <code>autonomy_until</code> (<code>""</code>, a stage name, <code>"END"</code>, or <code>"rediscover"</code>) auto-proceeds gates.</td></tr>
+  <tr><td><code>resume_pipeline(project, snapshot, at?, branch?, folder?)</code></td><td>Rebuild a snapshot and re-enter at any stage / branch; <code>folder=</code> self-roots it.</td></tr>
+</table>
+
+<h2 id="tools-spec">Tools — spec / clarify / ask</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>hx_question_check(folder?, project?)</code></td><td>Validate the project spec (FINER / PICOT / GQM filled; gate.status ready; no <code>[NEEDS CLARIFICATION]</code> / <code>TODO</code> / <code>@open-question</code> markers). Falls back to <code>question.md</code> if no spec yet. Spec §B + F.2/F.3.</td></tr>
+  <tr><td><code>hx_clarify(folder?, project?)</code></td><td>Walk every unresolved clarification marker via elicitation; patch the spec in place with anchored SEARCH/REPLACE. Spec §F.3.</td></tr>
+  <tr><td><code>hx_ask(prompt, schema_json?, project?, field_name?)</code></td><td>Ask the researcher a structured question via MCP elicitation. Default schema is a flat text input; pass a JSON schema for choice / multi / confirm. The Q&amp;A is logged onto the pending step's <code>clarifications</code> list so the next stage's prompt surfaces it. Spec §C.</td></tr>
+  <tr><td><code>hx_constitution_init(folder?)</code></td><td>Ensure the workspace has a Constitution (<code>constitution.md</code>) and return it. Idempotent. Spec §F.1.</td></tr>
+</table>
+
+<h2 id="tools-atlas">Tools — atlas</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>hx_atlas_ingest(path?)</code></td><td>Process <code>atlas/inbox/</code> (idempotent, sha256 manifest). <code>path=</code> processes one file.</td></tr>
+  <tr><td><code>hx_atlas_recall(query, k?, mode?)</code></td><td>Auto-routing search (lexical / semantic / graph / community); returns refs only. Mode override available.</td></tr>
+  <tr><td><code>hx_atlas_get(id)</code></td><td>Fetch one page body (capped at 24KB).</td></tr>
+  <tr><td><code>hx_atlas_neighbors(page, k?)</code></td><td>k-hop neighbours over the link graph (refs only).</td></tr>
+  <tr><td><code>hx_atlas_lint()</code></td><td>11-kind hygiene report with suggested fixes per issue.</td></tr>
+  <tr><td><code>hx_atlas_propose(write_json)</code></td><td>Pre-flight an ADD: sandbox + dedup gate; no write. Warns on near-duplicates. Spec §G.</td></tr>
+  <tr><td><code>hx_atlas_reconcile()</code></td><td>Periodic sweep — lint by kind + promotion candidates (active pages with ≥ 3 inbound edges).</td></tr>
+  <tr><td><code>hx_atlas_put(path, title, content, summary?, type?, tier?, aliases_csv?)</code></td><td>Create / update a page (merges on the same path; preserves the creation clock).</td></tr>
+  <tr><td><code>hx_atlas_save(title, content, type?, project?, tier?)</code></td><td>File a synthesis / comparison answer as a proper page.</td></tr>
+  <tr><td><code>hx_atlas_promote(ids, tier)</code></td><td>Bump tier(s); confirms at canonical / published.</td></tr>
+  <tr><td><code>atlas_status()</code></td><td>Page count and known projects.</td></tr>
+  <tr><td><code>decision_log(project)</code></td><td>A project's stage-by-stage decision log.</td></tr>
+</table>
+
+<h2 id="tools-snapshots">Tools — snapshots</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>snapshot_list(project)</code></td><td>The DAG, git-log style.</td></tr>
+  <tr><td><code>snapshot_show(project, snap_id)</code></td><td>One snapshot's key state.</td></tr>
+  <tr><td><code>snapshot_diff(project, a, b)</code></td><td>Tracked differences between two snapshots.</td></tr>
+  <tr><td><code>snapshot_timeline(project)</code></td><td>Mermaid <code>gitGraph</code> of the DAG.</td></tr>
+  <tr><td><code>snapshot_revert(project, snapshot)</code></td><td>Restore a snapshot's artifacts to disk. Gated.</td></tr>
+  <tr><td><code>hx_snap_branch(project, snapshot, name)</code></td><td>Name a branch ref at a snapshot.</td></tr>
+  <tr><td><code>hx_snap_freeze(project, snapshot, tag)</code></td><td>Tag a snapshot immutable for publication.</td></tr>
+  <tr><td><code>hx_snap_fork(project, name)</code></td><td>Export the full history as <code>forks/&lt;name&gt;.tar.gz</code> — a single portable, reproducible bundle.</td></tr>
+</table>
+
+<h2 id="tools-reports">Tools — reports / constitution</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>hx_report_send_back(folder, project, stage)</code></td><td>Read the (researcher-modified) stage HTML report from <code>atlas/projects/&lt;project&gt;/reports/&lt;stage&gt;.html</code>, extract the embedded annotations, and stash agent-readable feedback for the next pass of that stage. Spec §D.</td></tr>
+</table>
+
+<h2 id="tools-runs">Tools — run observability</h2>
+
+<table class="tools">
+  <tr><th>Tool</th><th>Purpose</th></tr>
+  <tr><td><code>hx_run_status(project)</code></td><td>Latest run's status — survives a server restart.</td></tr>
+  <tr><td><code>hx_run_events(project, since=N)</code></td><td>Tail the run's transition events since sequence <code>N</code>.</td></tr>
+  <tr><td><code>hx_run_plan_set(project, autonomy_until?, steps_json?)</code></td><td>Steer the live run's Plan (effective at the next gate).</td></tr>
+</table>
+
+<h2 id="resources">Resources</h2>
+
+<p>Read-only, addressed by URI:</p>
+
+<table class="tools">
+  <tr><th>Template</th><th>Contents</th></tr>
+  <tr><td><code>atlas://{path}</code></td><td>A page, with its frontmatter, by repo-relative path.</td></tr>
+  <tr><td><code>snapshot://{project}/{snap_id}</code></td><td>A snapshot's metadata as JSON.</td></tr>
+  <tr><td><code>hot://{project}</code></td><td>The project's hot-cache working state ("where were we?").</td></tr>
+  <tr><td><code>thread://{project}/{name}</code></td><td>A project thread (hypothesis · data · spec · plan · design · code-org · glossary) — current state.</td></tr>
+  <tr><td><code>thread-at://{project}/{name}/{snap_id}</code></td><td>The same thread, bi-temporal — state at the given snapshot.</td></tr>
+</table>
+
+<p>
+  Resource paths that include a project name are confined by
+  <code>validate_project_name</code> (or its equivalent in
+  <code>spec_path</code> / <code>threads._resolve_path</code>) before
+  any file read — traversal attempts return a clean error rather than
+  leaking file contents.
+</p>
+
+<h2 id="prompts">Prompts</h2>
+
+<p>Canonical workflows the user invokes by name in Claude Code:</p>
+
+<table class="tools">
+  <tr><th>Prompt</th><th>Walks through</th></tr>
+  <tr><td><code>helix_ingest</code></td><td>Dropping files and ingesting the inbox.</td></tr>
+  <tr><td><code>helix_run</code></td><td>Driving the agent-driven run loop (you are the model).</td></tr>
+  <tr><td><code>helix_lint</code></td><td>An Atlas hygiene sweep and acting on each issue.</td></tr>
+  <tr><td><code>helix_freeze</code></td><td>The freeze-and-fork publication checklist.</td></tr>
+  <tr><td><code>helix_resume</code></td><td>Recovering context with the hot cache and history.</td></tr>
+</table>
+
+<h2 id="safety">Safety posture</h2>
+
+<p>Three things together:</p>
+
+<ol>
+  <li><strong>Curated tool set, no general code-exec.</strong> The
+    Builder writes artifacts; Helix never runs them. There is no
+    arbitrary shell, no eval, no dynamic <code>exec</code>.</li>
+  <li><strong>Client consent.</strong> State-changing tools are
+    confirmed by the client (the host's consent model) before they
+    run; promotion to a published tier additionally elicits an
+    explicit confirmation.</li>
+  <li><strong>Sandbox-first.</strong> All LLM-generated page and
+    artifact content passes the sandbox
+    (<code>sanitize_atlas_writes</code> /
+    <code>sanitize_code_artifacts</code>) before it reaches disk.
+    Model-controlled project / run / bundle / spec / thread names are
+    confined by <code>validate_project_name</code> at every filesystem
+    path root (no separators, no <code>..</code>, no leading dot).
+    Atlas reads canonicalise paths via
+    <code>Atlas._safe_resolve</code> as defence in depth.</li>
+</ol>
+
+<div class="note">
+  <h5>Recent hardening</h5>
+  <code>core/spec.spec_path</code> and
+  <code>core/threads._resolve_path</code> now call
+  <code>validate_project_name</code> at the single point of path
+  construction; the MCP tools (<code>hx_question_check</code>,
+  <code>hx_clarify</code>) catch <code>SandboxError</code> and return
+  a clean <em>Rejected (sandbox)</em> message rather than propagating
+  an exception. Regression tests in <code>tests/test_spec.py</code>
+  and <code>tests/test_threads.py</code> verify the
+  <code>thread://</code> resource and the spec tools reject
+  traversal attempts cleanly.
+</div>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="snapshots.html">← Snapshots</a> &nbsp;·&nbsp;
+  <a href="index.html">Docs home</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

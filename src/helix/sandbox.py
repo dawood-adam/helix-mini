@@ -79,6 +79,9 @@ def validate_content(content: str) -> str:
     return content
 
 
+_ATLAS_ACTIONS = ("ADD", "UPDATE", "SUPERSEDE", "LINK", "NOOP")
+
+
 def sanitize_atlas_writes(raw_writes: list[dict], atlas_root: Path) -> list[PageWrite]:
     if len(raw_writes) > MAX_WRITES_PER_BATCH:
         log.warning("Batch %d exceeds %d, truncating", len(raw_writes), MAX_WRITES_PER_BATCH)
@@ -98,14 +101,48 @@ def sanitize_atlas_writes(raw_writes: list[dict], atlas_root: Path) -> list[Page
         except SandboxError as e:
             log.warning("Sandbox blocked write: %s", e)
             continue
+        # Workstream G — write protocol fields. Compat: missing action
+        # defaults to ADD with a "agent-emitted (no action declared)"
+        # rationale, with a warning. Per phase-4 plan, hard-fail comes
+        # later when all prompts have been updated.
+        action = _clean_opt_str(w.get("action"))
+        if action:
+            action = action.upper()
+            if action not in _ATLAS_ACTIONS:
+                log.warning("Unknown atlas action %r, treating as ADD", action)
+                action = "ADD"
+        else:
+            action = "ADD"
+        because = _clean_opt_str(w.get("because")) or "agent-emitted (no action declared)"
+        provenance = _clean_provenance(w.get("provenance"))
+        spec_refs = _clean_str_list(w.get("spec_refs"))
         writes.append(PageWrite(
             path=w["path"], title=title, content=content, summary=summary,
             type=_clean_opt_str(w.get("type")),
             tier=_clean_opt_str(w.get("tier")),
             aliases=_clean_str_list(w.get("aliases")),
             links=_clean_links(w.get("links")),
+            action=action, because=because,
+            provenance=provenance, spec_refs=spec_refs,
         ))
     return writes
+
+
+def _clean_provenance(v) -> dict | None:
+    """Coerce a provenance dict to a small whitelist of expected keys, all
+    stringified + control-stripped. Returns None if the input isn't a dict
+    (the sanitizer's caller may derive defaults: stage / run_id /
+    snapshot_id are knowable server-side)."""
+    if not isinstance(v, dict):
+        return None
+    out: dict = {}
+    for k in ("stage", "run_id", "snapshot_id", "confidence"):
+        if v.get(k) is not None:
+            out[k] = CONTROL_CHAR_PATTERN.sub("", str(v[k])).strip()[:128]
+    srcs = _clean_str_list(v.get("sources"), cap=20)
+    if srcs:
+        out["sources"] = srcs
+    return out or None
 
 
 def _clean_opt_str(v) -> str | None:

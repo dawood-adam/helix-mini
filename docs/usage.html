@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Usage · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>usage guide</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html" class="active">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+      <a href="mcp.html">MCP</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#mental-model">Mental model</a></li>
+    <li><a href="#a-day">A day with Helix</a></li>
+    <li><a href="#control">Control modes</a></li>
+    <li><a href="#send-back">Sending a run back</a></li>
+    <li><a href="#reports">HTML reports + annotations</a></li>
+    <li><a href="#ingest">Ingesting sources</a></li>
+    <li><a href="#recall">Recall &amp; get</a></li>
+    <li><a href="#observe">Observing &amp; resuming</a></li>
+    <li><a href="#limits">Budget &amp; pauses</a></li>
+    <li><a href="#publish">Publishing a result</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Usage guide</h1>
+<p class="lede">Helix is driven through an MCP client. This guide uses Claude Code throughout.</p>
+
+<h2 id="mental-model">Mental model</h2>
+
+<p>
+  You talk to Claude Code in natural language. Claude Code calls Helix's
+  MCP tools for you. When a stage needs the model, Helix returns the
+  stage's prompt as the tool output — Claude Code is the model and
+  answers in its own turn. The server runs no sampling and stores no
+  credentials.
+</p>
+
+<div class="mermaid">
+flowchart LR
+  U[You] -- chat --> A[Claude Code]
+  A -- hx_step / hx_submit / ... --> H[helix-mcp]
+  H -- elicit at gates --> A
+  A -- relay --> U
+  H --&gt; FS[(workspace files)]
+  classDef u fill:#ddf4ff,stroke:#0550ae;
+  classDef s fill:#dafbe1,stroke:#1a7f37;
+  class A u
+  class H s
+</div>
+
+<p>
+  Two things deserve emphasis:
+</p>
+<ul>
+  <li><strong>The agent is the model.</strong> Helix renders each
+    stage's SYSTEM + USER prompt and returns it as a tool result. The
+    agent reads it, reasons, and replies via <code>hx_submit</code>.
+    No <code>sampling/createMessage</code>, no API keys, no provider
+    config.</li>
+  <li><strong>The pipeline pauses at every gate by default.</strong>
+    A gate is an MCP <em>elicitation</em> — a small structured question
+    — that you answer through Claude Code. The Plan
+    (<a href="gates.html#plan">Gates → Plan</a>) controls which gates
+    auto-proceed.</li>
+</ul>
+
+<h2 id="a-day">A day with Helix</h2>
+
+<p>A representative session, beginning to end, all in natural language:</p>
+
+<pre><code>you&gt;   start helix
+helix&gt; [wizard] name?  question?  control mode?  source folder?
+       …Scout finished. 2 candidate approaches; recommends #1.
+       Proceed, send back, or stop?
+you&gt;   send back to scout — restrict to 2024 papers only
+helix&gt; Re-ran Scout with that directive. Scout Critic done. Proceed?
+you&gt;   run autonomously up to the validator
+helix&gt; …Planner done. Builder done. Validator pass. Stopping at the
+       results critic per your plan. Proceed, send back, or stop?
+you&gt;   proceed
+helix&gt; Done.  verdict=ship  stages=6  tokens~12,400
+you&gt;   freeze that snapshot as v1 and fork the project as v1-public
+helix&gt; Frozen snap-7 as 'v1'. Bundle: forks/v1-public.tar.gz (124KB).
+you&gt;   health-check the atlas
+helix&gt; 3 issue(s): 2 stale, 1 missing-page. Suggestions: …
+you&gt;   resolve the missing page about Lazzaro 2024
+helix&gt; [drafts a page, asks confirm at canonical tier]
+you&gt;   confirm
+helix&gt; Promoted atlas:concepts:lazzaro-2024 → canonical.</code></pre>
+
+<h2 id="control">Control modes</h2>
+
+<p>
+  The control mode you pick in the wizard becomes a <strong>Plan</strong>
+  that governs every gate:
+</p>
+
+<table>
+  <tr><th>Mode</th><th>Behaviour</th><th>Constructor</th></tr>
+  <tr><td>Step-by-step</td><td>Pause and ask at every transition (default).</td><td><code>autonomy_until=""</code></td></tr>
+  <tr><td>Auto until a stage</td><td>Auto-proceed until that stage, then ask.</td><td><code>autonomy_until="builder"</code></td></tr>
+  <tr><td>Fully autonomous</td><td>Never ask; deterministic routing only.</td><td><code>autonomy_until="END"</code></td></tr>
+  <tr><td>Rediscover loop</td><td>Same as "END", plus restart from Scout after Results Critic — up to 3 iterations — carrying the hypothesis thread forward. See <a href="gates.html#rediscover">Gates → Rediscover</a>.</td><td><code>autonomy_until="rediscover"</code></td></tr>
+  <tr><td>Per-stage steps</td><td>An explicit list of <code>{agent, directive?, autonomy}</code> via <code>hx_run_plan_set(steps_json=…)</code>.</td><td>—</td></tr>
+</table>
+
+<p>
+  The plan can be changed mid-run with <code>hx_run_plan_set</code>;
+  the new plan is effective at the next gate. Deterministic routes (a
+  hard Validator band miss, a Results-Critic <code>iterate</code>
+  verdict) fire regardless of autonomy.
+</p>
+
+<h2 id="send-back">Sending a run back</h2>
+
+<p>
+  Send-back is the single mechanism for course-correction. At any gate
+  you may pick a target stage and write a one-line directive:
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  participant U as You
+  participant H as helix-mcp
+  H-&gt;&gt;U: After scout_critic: ship · iterate · send_back?
+  U--&gt;&gt;H: send_back → scout, "restrict to 2024 papers only"
+  H-&gt;&gt;H: record_feedback(state, from='scout_critic', to='scout', note)
+  H-&gt;&gt;H: snapshot the send-back
+  H-&gt;&gt;U: NEEDS MODEL — scout (with feedback block in USER prompt)
+</div>
+
+<p>
+  The directive is appended to the target stage's USER prompt as a
+  <em>Human feedback</em> block on the re-run. The send-back is itself
+  a snapshot, so the branch you took is fully resumable.
+</p>
+
+<h2 id="reports">HTML reports + annotations</h2>
+
+<p>
+  Every completed stage writes a self-contained HTML report at
+  <code>atlas/projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code> —
+  no sidecar, no JS dependencies, the annotation JSON is embedded in
+  the file itself. The gate prompt includes a clickable
+  <code>file://</code> link to the latest report.
+</p>
+
+<p>
+  Open it in Chrome / Edge. The Scout Critic's notes appear as
+  Distill-style side margin annotations. You can:
+</p>
+
+<ul>
+  <li><strong>Accept</strong> / <strong>Reject</strong> a critic note (the
+    rejection reason is recorded so the agent doesn't reintroduce it).</li>
+  <li><strong>Reply</strong> with a Google-Docs-style threaded comment.</li>
+  <li><strong>Add a comment</strong> of your own.</li>
+  <li><strong>Send back ↩</strong> — mark the stage for re-run with this
+    note as the directive.</li>
+</ul>
+
+<p>
+  Save the file (File System Access API on Chromium, with a
+  Download-annotated-copy fallback elsewhere). Then in chat:
+</p>
+
+<pre><code>you&gt;   send back the scout report
+helix&gt; Extracted 3 annotations (1 send-back, 1 kept, 1 rejected).
+       Feedback for re-run of 'scout': …</code></pre>
+
+<p>
+  Internally this is <code>hx_report_send_back(folder, project, stage)</code>:
+  it parses the embedded W3C Web Annotation JSON, buckets by state, and
+  builds the agent-readable feedback string that's threaded into the
+  next Scout pass.
+</p>
+
+<h2 id="ingest">Ingesting sources</h2>
+
+<p>Three ways to bring material in:</p>
+
+<ol>
+  <li><strong>Direct.</strong> Put PDFs / markdown / text / code / data
+    anywhere under the project. Scout reads them on its first turn
+    (<code>core.ingest.ingest_folder</code> walks the project source
+    folder and skips binaries).</li>
+  <li><strong>Managed via inbox.</strong> Drop files into
+    <code>atlas/inbox/</code> and ask <em>"process my inbox"</em>. Helix
+    runs <code>hx_atlas_ingest</code>: idempotent (sha256 manifest);
+    each new file becomes a <code>type: source</code> page; the
+    original moves to <code>atlas/raw/</code>. Re-running is a no-op.</li>
+  <li><strong>Direct write.</strong> The agent can call
+    <code>hx_atlas_put</code> with explicit
+    <code>{path, title, content, summary, action, because, provenance, spec_refs}</code>.
+    The write protocol — see <a href="atlas.html#write-protocol">Atlas →
+    Write protocol</a> — enforces a closed action vocabulary and
+    mandatory provenance.</li>
+</ol>
+
+<h2 id="recall">Recall &amp; get</h2>
+
+<p>
+  <code>hx_atlas_recall</code> is one entry point with a query-shape
+  router; <code>hx_atlas_get</code> is the body fetcher. Recall returns
+  <em>references only</em> (id · title · tier · ~120-char summary ·
+  score · mode); bodies are capped and fetched on demand. This
+  find/fetch split keeps a search from flooding the model's context.
+</p>
+
+<table>
+  <tr><th>You ask</th><th>Router picks</th></tr>
+  <tr><td>"how does rPPG relate to PPG?"</td><td>graph (relational query)</td></tr>
+  <tr><td>"overview of cuffless BP estimation"</td><td>community (cluster around best hit)</td></tr>
+  <tr><td>"a long descriptive query of 5+ words…"</td><td>semantic (cosine on local embeddings)</td></tr>
+  <tr><td>"short specific phrase"</td><td>lexical (BM25)</td></tr>
+  <tr><td><code>atlas:concepts:rppg</code> or a path</td><td>graph (k-hop from that node)</td></tr>
+</table>
+
+<p>
+  Semantic mode needs vectors. The optional <code>fastembed</code>
+  extra provides a local model; without it semantic queries fall back to
+  lexical (recall never hard-fails). Vectors are cached in
+  <code>.helix/embeddings.json</code>, keyed by body sha256 — only changed
+  pages are re-embedded.
+</p>
+
+<h2 id="observe">Observing &amp; resuming</h2>
+
+<p>Helix is engineered so you can always answer "where were we?":</p>
+
+<table>
+  <tr><th>Tool / resource</th><th>Tells you</th></tr>
+  <tr><td><code>hx_run_status(project)</code></td><td>Latest run's state — status, current stage, last snapshot, token estimate, note. Persisted; survives a restart.</td></tr>
+  <tr><td><code>hx_run_events(project, since=N)</code></td><td>The run's transition events since sequence <code>N</code>.</td></tr>
+  <tr><td><code>snapshot_list(project)</code></td><td>The DAG, git-log style.</td></tr>
+  <tr><td><code>snapshot_show(project, id)</code></td><td>One snapshot's state.</td></tr>
+  <tr><td><code>snapshot_diff(project, a, b)</code></td><td>Tracked differences between two snapshots.</td></tr>
+  <tr><td><code>snapshot_timeline(project)</code></td><td>Mermaid <code>gitGraph</code> of the history.</td></tr>
+  <tr><td><code>hot://&lt;project&gt;</code></td><td>The hot cache — one-page working state regenerated at run end.</td></tr>
+  <tr><td><code>thread://&lt;project&gt;/&lt;name&gt;</code></td><td>A project thread (hypothesis · data · spec · plan · design · code-org · glossary). Add <code>thread-at://&lt;project&gt;/&lt;name&gt;/&lt;snap&gt;</code> for a bi-temporal read.</td></tr>
+</table>
+
+<p>To resume:</p>
+
+<pre><code>you&gt;   resume bp-from-rppg from snapshot 5 on a branch called 'rppg-v2'
+
+# under the hood:
+resume_pipeline(project="bp-from-rppg", snapshot=5,
+                branch="rppg-v2", folder="./bp-from-rppg")</code></pre>
+
+<p>
+  <code>resume_pipeline</code> rebuilds the snapshot's full state
+  (artifact bytes come from the content-addressed object store),
+  re-enters the agent-driven loop at the snapshot's stage by default
+  (or any other stage via <code>at=</code>), and returns the next
+  prompt. <code>folder</code> self-roots the run at the project,
+  regardless of the server's cwd.
+</p>
+
+<h2 id="limits">Budget &amp; pauses</h2>
+
+<p>
+  Per-project <code>helix.toml</code>:
+</p>
+
+<pre><code>[limits]
+token_cap = 200000     # ≈ chars/4 estimate, across all stages
+call_cap  = 50         # number of LLM-stage submissions</code></pre>
+
+<p>
+  Cycling has no fixed cap. Reaching either ceiling pauses the run with
+  a resumable snapshot; interactively, you are offered the choice to
+  raise the ceiling and continue. The run does <em>not</em> crash and
+  does not lose progress — every stop has a snapshot.
+</p>
+
+<p>Other pause causes (all resumable):</p>
+<ul>
+  <li>Declined gate elicitation (<code>Declined</code>).</li>
+  <li>Lost MCP client mid-stage (<code>ClientUnavailable</code>) —
+    snapshot the partial work and stop.</li>
+  <li>Stage error — snapshot with <code>decision: "error"</code> and
+    return.</li>
+  <li>Server restart between <code>hx_step</code> and <code>hx_submit</code> —
+    the pending step is persisted to
+    <code>.helix/runs/&lt;project&gt;.pending.json</code>; the next
+    <code>hx_step</code> picks it back up.</li>
+</ul>
+
+<h2 id="publish">Publishing a result</h2>
+
+<p>The "freeze and fork" checklist when a run is ready to share:</p>
+
+<ol>
+  <li><code>hx_atlas_lint</code> — resolve blockers.</li>
+  <li><code>hx_atlas_promote(ids, "published")</code> — confirms via
+    elicitation.</li>
+  <li><code>hx_snap_freeze(project, snapshot, tag)</code> — mark the
+    snapshot immutable.</li>
+  <li><code>hx_snap_fork(project, name)</code> — exports
+    <code>forks/&lt;name&gt;.tar.gz</code> (snapshots + objects + index +
+    refs). One file; reproducible.</li>
+</ol>
+
+<p>
+  Or invoke the canonical workflow by name:
+  <code>helix_freeze</code> walks you through it.
+</p>
+
+<hr>
+
+<p class="small">
+  Continue to <a href="forge.html">Forge — the pipeline</a> for what each
+  stage does, or <a href="gates.html">Gates &amp; control</a> for the
+  full mechanics of HITL, autonomy, send-back, and rediscover.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="quickstart.html">← Quickstart</a> &nbsp;·&nbsp;
+  <a href="forge.html">Forge →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>
