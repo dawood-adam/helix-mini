@@ -8,7 +8,7 @@ from helix.config import ModelConfig
 from helix.core.gates import GateDecision
 from helix.core.plan import Plan, Step
 
-_ALL = ("scout", "critic_methods", "planner", "builder",
+_ALL = ("scout", "scout_critic", "planner", "builder",
         "validator", "critic_results")
 
 

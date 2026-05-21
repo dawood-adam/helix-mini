@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gates &amp; control · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>gates &amp; control</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="gates.html" class="active">Gates</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#what">What is a gate</a></li>
+    <li><a href="#decisions">The three decisions</a></li>
+    <li><a href="#plan">The Plan</a></li>
+    <li><a href="#autonomy-modes">Autonomy modes</a></li>
+    <li><a href="#send-back">Send-back, in detail</a></li>
+    <li><a href="#deterministic">Deterministic routes</a></li>
+    <li><a href="#rediscover">The rediscover loop</a></li>
+    <li><a href="#mid-run">Steering mid-run</a></li>
+    <li><a href="#pauses">Pauses &amp; resume</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Gates &amp; control</h1>
+<p class="lede">How a run pauses, asks, sends itself back, restarts itself, and resumes.</p>
+
+<h2 id="what">What is a gate</h2>
+
+<p>
+  A <strong>gate</strong> is the decision point at the end of every
+  stage. <code>loop.advance</code>:
+</p>
+
+<ol>
+  <li>Runs the stage (the agent answers; the snapshot is minted; the
+    report is written).</li>
+  <li>Calls <code>gates.decide_gate(state, stage, decision, rationale,
+    ask=, interactive=, plan=)</code>.</li>
+  <li>Feeds the result into <code>transitions.next_stage</code> — the
+    one routing authority.</li>
+</ol>
+
+<p>
+  <code>decide_gate</code> consults the run-scoped <strong>Plan</strong>
+  to decide whether to <em>ask</em> the human (HITL) or
+  <em>auto-proceed</em>. An ask goes through the client-IO seam as MCP
+  elicitation; the choice the human makes is translated into a typed
+  <code>GateDecision</code>.
+</p>
+
+<h2 id="decisions">The three decisions</h2>
+
+<p>Whether the gate is auto or HITL, it always resolves to one of:</p>
+
+<table>
+  <tr><th>Decision</th><th><code>GateDecision</code></th><th>Effect</th></tr>
+  <tr><td><strong>proceed</strong></td><td><code>("proceed", None, None)</code></td><td>Advance to the next stage in pipeline order. END past the last stage.</td></tr>
+  <tr><td><strong>send back</strong></td><td><code>("goto", target, note)</code></td><td>Jump to <code>target</code> (any stage), recording <code>note</code> as feedback for that stage's next run.</td></tr>
+  <tr><td><strong>stop</strong></td><td><code>("stop", None, None)</code></td><td>End the run cleanly at END. Resumable from the last snapshot.</td></tr>
+</table>
+
+<p>HITL prompt shape (MCP elicitation, scripted by <code>io.gate_asker</code>):</p>
+
+<pre><code>After scout_critic: 2 candidate approaches; recommends approach-1.
+Strengths: rPPG well-studied; weaknesses: rejection method.
+Note: this run is auto-proceeding until 'builder'.
+
+[ proceed · send back · stop ]
+   │
+   └── send back → which stage? [ scout · scout_critic · planner · … ]
+                    feedback for that stage (one line)?</code></pre>
+
+<p>
+  Declining the gate elicitation raises <code>Declined</code>, which the
+  orchestrator catches and turns into a resumable
+  <code>paused-input</code> pause — same contract as the
+  cost-ceiling pause.
+</p>
+
+<h2 id="plan">The Plan</h2>
+
+<p>
+  Run control is the run-scoped <strong>Plan</strong>
+  (<code>core.plan.Plan</code>). It is threaded through the loop
+  alongside the gate asker — never stored in
+  <code>PipelineState</code>, so it never lands in a snapshot. The
+  Plan governs two things at each transition:
+</p>
+
+<ul>
+  <li><strong>Autonomy</strong> per gate: <em>auto</em> or <em>ask</em>.</li>
+  <li><strong>Directive</strong> per stage: an optional one-line
+    instruction injected into that stage's USER prompt on the next run
+    (through the existing <code>record_feedback</code> channel).</li>
+</ul>
+
+<p>Two construction paths:</p>
+
+<table>
+  <tr><th>Constructor</th><th>Result</th></tr>
+  <tr><td><code>Plan()</code></td><td>Empty — ask at every gate (step-by-step).</td></tr>
+  <tr><td><code>Plan.from_autonomy_until(s)</code></td><td>Compat. <code>""</code> / <code>"none"</code> → pure HITL; a stage name → auto until that stage; <code>"END"</code> → full auto; <code>"rediscover"</code> → full auto + the discovery loop (see below).</td></tr>
+  <tr><td><code>Plan(steps=[Step("scout", autonomy="auto"), …])</code></td><td>Per-stage autonomy + optional directive per stage.</td></tr>
+</table>
+
+<h2 id="autonomy-modes">Autonomy modes</h2>
+
+<table>
+  <tr><th>Mode</th><th>Behaviour</th><th>When to use</th></tr>
+  <tr><td>Step-by-step</td><td>Ask at every gate. Default for the wizard.</td><td>First run on a new project; exploratory work; teaching.</td></tr>
+  <tr><td><code>autonomy_until="builder"</code></td><td>Auto-proceed Scout / Scout Critic / Planner gates; pause at the Builder.</td><td>You trust the framing but want to review the code before metrics.</td></tr>
+  <tr><td><code>autonomy_until="END"</code></td><td>Auto-proceed every gate; deterministic routing only.</td><td>Reproducing a known result; batch over many projects.</td></tr>
+  <tr><td><code>autonomy_until="rediscover"</code></td><td>Like END, plus the hypothesis loop — see <a href="#rediscover">below</a>.</td><td>Open-ended exploration with bounded spend.</td></tr>
+  <tr><td>Explicit steps</td><td>A <code>[Step(agent, autonomy, directive?)]</code> list. Stages not in the plan fall back to <em>ask</em>.</td><td>Programmatic control; targeted directives per stage.</td></tr>
+</table>
+
+<h2 id="send-back">Send-back, in detail</h2>
+
+<p>
+  Send-back is the only correction mechanism — there is no separate
+  "edit" or "rewind". When you pick <em>send back</em> at a gate:
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  participant U as You (via Claude Code)
+  participant G as gates.decide_gate
+  participant S as state.human_feedback
+  participant N as transitions.next_stage
+  participant L as loop.advance
+  G-&gt;&gt;U: elicit — proceed / send back / stop?
+  U--&gt;&gt;G: send_back
+  G-&gt;&gt;U: elicit — which stage?
+  U--&gt;&gt;G: scout
+  G-&gt;&gt;U: elicit — feedback for that stage?
+  U--&gt;&gt;G: restrict to 2024 papers
+  G-&gt;&gt;S: record_feedback(from=scout_critic, to=scout, note)
+  G--&gt;&gt;N: GateDecision("goto", "scout", note)
+  N--&gt;&gt;L: next_stage = "scout"
+  L-&gt;&gt;L: mint a snapshot for the send-back itself
+  L-&gt;&gt;L: re-run scout — its _ctx_scout includes the new feedback block
+</div>
+
+<p>
+  Two things happen at once. The directive is appended to
+  <code>state.human_feedback</code> targeting the chosen stage; the
+  send-back itself is captured as a snapshot, so the branch you took is
+  fully resumable.
+</p>
+
+<p>
+  The receiving stage's context builder
+  (<code>core.agents._ctx_&lt;stage&gt;</code>) ends with a
+  <code>_feedback_block(s, stage)</code> call that renders the
+  directive into the USER prompt as:
+</p>
+
+<pre><code>## Human feedback — address this on this pass
+- restrict to 2024 papers
+</code></pre>
+
+<p>
+  The agent reads the block on its re-run. There is no special
+  "send-back agent" or alternate code path; every send-back goes
+  through the same <code>next_stage</code> + the same
+  <code>advance</code> as a normal transition.
+</p>
+
+<h2 id="deterministic">Deterministic routes</h2>
+
+<p>
+  Two routes fire <em>regardless</em> of the Plan's autonomy:
+</p>
+
+<table>
+  <tr><th>Trigger</th><th>Effect</th></tr>
+  <tr><td>Validator emits at least one <code>HARD:</code> flag</td><td>Route back to Builder; the flags appear in Builder's <code>_ctx_builder</code> as <em>Validator flags</em>.</td></tr>
+  <tr><td>Results Critic returns <code>verdict: "iterate"</code></td><td>Route back to Builder; the critic's <code>recommendations</code> appear as feedback.</td></tr>
+</table>
+
+<p>
+  These are deliberate. A run that auto-proceeded to the Validator and
+  failed shouldn't be forced through a manual gate just to be told to
+  iterate; the orchestrator routes it back with the flags already
+  threaded in.
+</p>
+
+<h2 id="rediscover">The rediscover loop</h2>
+
+<p>
+  <code>autonomy_until="rediscover"</code> activates the autonomous
+  hypothesis loop (Workstream H). After Results Critic, if the
+  iteration count is below the cap (<code>REDISCOVER_CAP = 3</code>),
+  the orchestrator overrides the END transition to <em>scout</em>:
+</p>
+
+<div class="mermaid">
+flowchart LR
+  S[Scout] --&gt; SC[Scout Critic] --&gt; P[Planner] --&gt; B[Builder] --&gt; V[Validator] --&gt; RC[Results Critic]
+  RC -- "iter &lt; 3" --&gt; S
+  RC -- "iter == 3 or budget hit" --&gt; END([END])
+  classDef pipe fill:#ddf4ff,stroke:#0550ae;
+  class S,SC,P,B,V,RC pipe
+</div>
+
+<p>The carrier across iterations is the <strong>hypothesis thread</strong>:</p>
+
+<ul>
+  <li><strong>Scout</strong> proposes hypotheses on the first
+    iteration; subsequent iterations refine the survivors and add
+    new candidates.</li>
+  <li><strong>Scout Critic</strong> ranks them on testable /
+    falsifiable / distinct (the idea tournament — Co-Scientist
+    shape).</li>
+  <li><strong>Results Critic</strong> returns a per-hypothesis verdict
+    (<code>supported · refuted · inconclusive</code>) and writes
+    revised statements back to the thread.</li>
+</ul>
+
+<p>
+  Three guard rails keep spend bounded:
+</p>
+
+<ol>
+  <li><strong>Hard iteration cap</strong>:
+    <code>REDISCOVER_CAP = 3</code> in
+    <code>core.hypothesis</code>.</li>
+  <li><strong>Token / call budget</strong>: the existing
+    <code>[limits]</code> apply across iterations; reaching either
+    pauses the run with a resumable snapshot.</li>
+  <li><strong>Hypothesis status machine</strong>: refuted /
+    superseded hypotheses are pushed to the bottom of the ranking, so
+    a misranked idea can't dominate forever.</li>
+</ol>
+
+<p>
+  Lint check <code>discovery-log</code> flags any hypothesis marked
+  <code>Supported</code> with no <code>support:</code> citations — a
+  discovery without evidence.
+</p>
+
+<h2 id="mid-run">Steering mid-run</h2>
+
+<p>
+  The Plan is live for the duration of a run, held in
+  <code>runs._LIVE</code>. <code>hx_run_plan_set</code> mutates it;
+  the new plan is effective at the next gate (the loop re-reads the
+  Plan at every transition).
+</p>
+
+<pre><code># Change autonomy_until mid-run:
+hx_run_plan_set(project="bp-from-rppg", autonomy_until="END")
+
+# Or supply explicit steps:
+hx_run_plan_set(project="bp-from-rppg", steps_json=json.dumps([
+  {"agent": "scout",   "autonomy": "auto"},
+  {"agent": "planner", "autonomy": "hitl", "directive": "use 5-fold CV"},
+  {"agent": "builder", "autonomy": "auto"},
+]))</code></pre>
+
+<p>
+  Use this to escalate ("autonomous until I say otherwise") or
+  de-escalate ("ask me at the next gate") without restarting the run.
+</p>
+
+<h2 id="pauses">Pauses &amp; resume</h2>
+
+<p>Every stop has a snapshot. Five things can pause a run:</p>
+
+<table>
+  <tr><th>Cause</th><th>Snapshot decision</th><th>Resume with</th></tr>
+  <tr><td>Token / call ceiling reached</td><td><code>paused</code></td><td><code>hx_step</code> (re-asks to raise ceiling, interactively).</td></tr>
+  <tr><td>Gate elicitation declined</td><td>(prior stage snapshot is the resume point)</td><td><code>hx_step</code> resumes at the same gate.</td></tr>
+  <tr><td>MCP client dropped mid-stage</td><td><code>error</code></td><td><code>resume_pipeline(project, snap, at=)</code>.</td></tr>
+  <tr><td>Stage error</td><td><code>error</code></td><td>Same as above — fix the cause, then <code>resume_pipeline</code>.</td></tr>
+  <tr><td>Server restart between <code>hx_step</code> and <code>hx_submit</code></td><td>(pending step persisted to <code>.helix/runs/&lt;project&gt;.pending.json</code>)</td><td>Next <code>hx_step(folder)</code> re-shows the outstanding step.</td></tr>
+</table>
+
+<p>
+  <code>hx_step(folder)</code> is idempotent: a pending step is
+  re-shown verbatim with the same <code>pending_token</code>. There is
+  no second runner — the same <code>advance</code> picks up from the
+  prior snapshot. See <a href="snapshots.html">Snapshots</a> for how
+  resume reconstructs state, and <a href="usage.html#observe">Usage →
+  Observing &amp; resuming</a> for the day-to-day commands.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="forge.html">← Forge</a> &nbsp;·&nbsp;
+  <a href="atlas.html">Atlas →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Helix — collaborative research orchestrator + discovery engine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Helix turns source material into validated research through an agent-driven six-stage pipeline. Documentation hub.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand">Helix <span>collaborative research orchestrator + discovery engine</span></div>
+    <nav class="crumbs">
+      <a href="index.html" class="active">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html">Forge</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+      <a href="mcp.html">MCP</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <h4>Documentation</h4>
+  <ol>
+    <li><strong>Getting started</strong></li>
+    <li><a href="quickstart.html">Quickstart</a></li>
+    <li><a href="usage.html">Usage guide</a></li>
+    <li style="margin-top:10px;"><strong>Architecture</strong></li>
+    <li><a href="architecture-conceptual.html">Conceptual</a></li>
+    <li><a href="architecture-technical.html">Technical</a></li>
+    <li style="margin-top:10px;"><strong>Subsystems</strong></li>
+    <li><a href="forge.html">Forge — the pipeline</a></li>
+    <li><a href="gates.html">Gates &amp; control</a></li>
+    <li><a href="atlas.html">Atlas — the wiki</a></li>
+    <li><a href="snapshots.html">Snapshots</a></li>
+    <li><a href="mcp.html">MCP surface</a></li>
+    <li style="margin-top:10px;"><strong>References</strong></li>
+    <li><a href="specs/0001-helix-improvements.html">Spec 0001</a></li>
+    <li><a href="https://github.com/dawood-adam/helix-mini">Source on GitHub</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Helix</h1>
+<p class="lede">A collaborative research orchestrator and discovery engine, driven by a Claude Code agent over MCP.</p>
+
+<p>
+  Helix turns source material — papers, code, data — into a validated
+  result through a disciplined six-stage pipeline, with a human checkpoint
+  at every transition. It maintains a typed, frontmatter-driven research
+  wiki (the <strong>Atlas</strong>) that compounds across projects, and a
+  content-addressed snapshot DAG (the <strong>Snapshots</strong>) that
+  makes every step inspectable, diffable, branchable, and resumable.
+</p>
+
+<p>
+  Helix has <strong>no model of its own and holds no credentials</strong>.
+  The Claude Code agent <em>is</em> the model. Each stage hands its
+  prompt back to the agent through the tool loop
+  (<code>hx_step</code> / <code>hx_submit</code>); the server runs no
+  sampling and stores no API keys.
+</p>
+
+<h2 id="at-a-glance">At a glance</h2>
+
+<div class="mermaid">
+flowchart LR
+  S([Scout]) --> SC([Scout Critic])
+  SC --> P([Planner])
+  P --> B([Builder])
+  B --> V([Validator])
+  V --> RC([Results Critic])
+  V -.->|hard miss| B
+  RC -.->|iterate| B
+  RC -.->|rediscover| S
+  classDef llm fill:#ddf4ff,stroke:#0550ae,color:#0550ae;
+  classDef det fill:#dafbe1,stroke:#1a7f37,color:#1a7f37;
+  class S,SC,P,B,RC llm
+  class V det
+</div>
+
+<p class="small" style="text-align:center;margin-top:-4px;">
+  Five LLM stages (blue) + one deterministic stage (green). Solid edges are
+  the normal forward path; dashed edges are deterministic routes the
+  orchestrator takes without asking.
+</p>
+
+<h2 id="what-you-get">What you get</h2>
+
+<div class="cards">
+  <div class="card">
+    <div class="meta">Pipeline</div>
+    <h3><a href="forge.html">Forge</a></h3>
+    <p>Six stages with HITL at every transition. Each stage emits a
+    Decision Card and a self-contained HTML report with an annotation
+    overlay you can mark up and send back.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Wiki</div>
+    <h3><a href="atlas.html">Atlas</a></h3>
+    <p>Markdown-on-disk pages with typed YAML frontmatter, a closed
+    action vocabulary (ADD/UPDATE/SUPERSEDE/LINK/NOOP), mandatory
+    provenance, spec cross-references, and an 11-check hygiene linter.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Version control</div>
+    <h3><a href="snapshots.html">Snapshots</a></h3>
+    <p>A content-addressed DAG of every transition. Branch, freeze,
+    fork (single-file portable bundle), and resume from any point —
+    even after a server restart.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Control</div>
+    <h3><a href="gates.html">Gates</a></h3>
+    <p>The run-scoped Plan controls per-gate autonomy. At a gate you
+    can <em>proceed</em>, <em>send back</em> with a directive, or
+    <em>stop</em>. Send-backs are themselves snapshots.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Discovery</div>
+    <h3><a href="gates.html#rediscover">Rediscover loop</a></h3>
+    <p>The autonomous hypothesis loop runs across the existing six
+    stages, capped at three iterations, carrying the hypothesis
+    thread forward each pass.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Drive surface</div>
+    <h3><a href="mcp.html">MCP server</a></h3>
+    <p>One stdio server. Curated tool set — no general code-exec.
+    All filesystem writes pass the sandbox; project / run / bundle
+    names go through <code>validate_project_name</code>.</p>
+  </div>
+</div>
+
+<h2 id="quickstart">90-second quickstart</h2>
+
+<pre><code>pip install -e .                 # core
+pip install -e '.[embed,pdf]'    # optional: semantic recall + PDF ingest
+
+mkdir my-research &amp;&amp; cd my-research
+helix init                       # scaffold a workspace (once)
+helix new bp-from-rppg           # scaffold a project
+cd bp-from-rppg                  # open in Claude Code, then:
+
+# ...in Claude Code chat:
+&gt; start helix</code></pre>
+
+<p>
+  Read the <a href="quickstart.html">Quickstart</a> for the full
+  walkthrough, or the <a href="usage.html">Usage guide</a> for control
+  modes, send-back, observation, and resume.
+</p>
+
+<h2 id="how-it-fits">How the pieces fit</h2>
+
+<div class="mermaid">
+flowchart TB
+  subgraph user[Claude Code]
+    A[agent — the model]
+  end
+  subgraph server[helix-mcp]
+    T[tools / resources / prompts]
+    L[orchestrator/loop.advance]
+    C[core: stages · gates · plan · transitions · atlas · threads · spec · hypothesis · snapshots]
+  end
+  A --hx_step--> T
+  T --> L
+  L --> C
+  L --NEEDS MODEL--> A
+  A --hx_submit--> T
+  T -. elicitation .-> A
+  classDef box fill:#f6f8fa,stroke:#d0d7de;
+  class user,server box
+</div>
+
+<p>
+  One MCP server, one runner (<code>loop.advance</code>), one routing
+  authority (<code>core.transitions.next_stage</code>), one
+  client-IO seam (<code>helix/io.py</code>). The model is the client
+  agent, reached only through the tool loop.
+</p>
+
+<h2 id="design-principles">Design principles</h2>
+
+<ul>
+  <li><strong>Agent-driven, no credentials.</strong> The server
+    runs no model and holds no API keys. The agent answers every
+    model-needing stage through the tool loop.</li>
+  <li><strong>One snapshot per transition.</strong> The DAG is the
+    source of truth for history. A snapshot calls no model.</li>
+  <li><strong>One Atlas per workspace.</strong> The wiki is
+    workspace-scoped so knowledge compounds across projects.</li>
+  <li><strong>Closed action vocabulary.</strong> Every Atlas write
+    declares ADD / UPDATE / SUPERSEDE / LINK / NOOP, a one-line
+    rationale (<code>because</code>), and a spec cross-reference.</li>
+  <li><strong>Sandbox-first.</strong> Every model-controlled string
+    that reaches the filesystem passes a validator. Project / run /
+    thread / bundle names go through <code>validate_project_name</code>;
+    page and artifact content go through
+    <code>sanitize_atlas_writes</code> / <code>sanitize_code_artifacts</code>.</li>
+  <li><strong>Resumable everywhere.</strong> Budget pause, declined
+    gate, lost client, server restart — all of them mint a snapshot
+    and stop cleanly. <code>hx_step</code> resumes from the last
+    snapshot.</li>
+</ul>
+
+<h2 id="status">Project status</h2>
+
+<table>
+  <tr><th>Surface</th><th>Status</th></tr>
+  <tr><td>Six-stage pipeline + Validator</td><td><span class="badge b-new">stable</span></td></tr>
+  <tr><td>Atlas + write protocol + lint (11 kinds)</td><td><span class="badge b-new">stable</span></td></tr>
+  <tr><td>Snapshots DAG + branch / freeze / fork / resume</td><td><span class="badge b-new">stable</span></td></tr>
+  <tr><td>MCP drive surface (agent-driven, no sampling)</td><td><span class="badge b-new">stable</span></td></tr>
+  <tr><td>Threads + glossary + spec / clarify</td><td><span class="badge b-new">stable</span></td></tr>
+  <tr><td>HTML reports + annotation overlay round-trip</td><td><span class="badge b-rec">recent</span></td></tr>
+  <tr><td>TDD task loop guardrails</td><td><span class="badge b-rec">recent</span></td></tr>
+  <tr><td>Discovery (rediscover) loop</td><td><span class="badge b-rec">recent</span></td></tr>
+</table>
+
+<p>206 tests passing, 1 optional (semantic recall — requires
+<code>fastembed</code>).</p>
+
+</main>
+</div>
+
+<footer class="site">
+  Helix — MIT licensed. <a href="https://github.com/dawood-adam/helix-mini">github.com/dawood-adam/helix-mini</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

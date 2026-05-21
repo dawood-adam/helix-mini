@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spec 0001 v6 — Helix: collaborative research orchestrator &amp; discovery engine</title>
+<style>
+  :root {
+    --bg:#fff; --fg:#1b1f23; --muted:#57606a; --line:#d0d7de;
+    --accent:#0550ae; --accent-soft:#ddf4ff; --warn:#bf3989;
+    --ok:#1a7f37; --err:#cf222e; --sidebg:#f6f8fa;
+    --code-bg:#f6f8fa; --side-bg:#fff8c5; --side-fg:#573a08;
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d;
+      --accent:#58a6ff; --accent-soft:#0c2d4d; --warn:#db61a2;
+      --ok:#3fb950; --err:#f85149; --sidebg:#161b22; --code-bg:#161b22;
+      --side-bg:#2a2210; --side-fg:#f1e09b; }
+  }
+  *{box-sizing:border-box;}
+  html,body{background:var(--bg);color:var(--fg);margin:0;
+    font-family:var(--font-sans);font-size:16px;line-height:1.55;}
+  a{color:var(--accent);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  .wrap{display:grid;grid-template-columns:260px minmax(0,1fr);
+    gap:32px;max-width:1200px;margin:0 auto;padding:24px;}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr;}
+    nav.toc{position:static !important;max-height:none !important;}}
+  nav.toc{position:sticky;top:24px;align-self:start;
+    max-height:calc(100vh - 48px);overflow:auto;font-size:13px;
+    border-right:1px solid var(--line);padding-right:16px;}
+  nav.toc h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;
+    color:var(--muted);letter-spacing:0.04em;}
+  nav.toc ol{list-style:none;padding:0;margin:0 0 16px;}
+  nav.toc li{padding:2px 0;}
+  nav.toc a{color:var(--fg);}
+  main{min-width:0;}
+  h1{font-size:28px;margin:0 0 4px;letter-spacing:-0.01em;}
+  h2{font-size:22px;margin:36px 0 10px;padding-top:14px;
+    border-top:1px solid var(--line);}
+  h3{font-size:17px;margin:22px 0 6px;}
+  h4{font-size:13px;margin:14px 0 4px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:0.04em;}
+  p,ul,ol{margin:8px 0;}
+  ul,ol{padding-left:22px;}
+  code,pre{font-family:var(--font-mono);font-size:13px;}
+  code{background:var(--code-bg);padding:1px 5px;border-radius:4px;}
+  pre{background:var(--code-bg);padding:12px 14px;border-radius:6px;
+    overflow:auto;border:1px solid var(--line);}
+  pre code{background:none;padding:0;}
+  blockquote{border-left:3px solid var(--accent);margin:12px 0;
+    padding:4px 14px;color:var(--muted);background:var(--accent-soft);
+    border-radius:0 6px 6px 0;}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;}
+  th,td{border:1px solid var(--line);padding:6px 10px;vertical-align:top;text-align:left;}
+  th{background:var(--sidebg);font-weight:600;}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;
+    font-size:11px;font-weight:600;letter-spacing:0.02em;vertical-align:1px;}
+  .b-draft{background:var(--accent-soft);color:var(--accent);}
+  .b-new{background:#dafbe1;color:var(--ok);}
+  .b-rec{background:#fff8c5;color:#573a08;}
+  .b-open{background:#ffebe9;color:var(--err);}
+  @media (prefers-color-scheme: dark){
+    .b-new{background:#033a16;color:#56d364;}
+    .b-rec{background:#2a2210;color:#f1e09b;}
+    .b-open{background:#410f15;color:#ff7b72;}
+  }
+  .mermaid{background:var(--sidebg);border:1px solid var(--line);
+    border-radius:6px;padding:10px;overflow:auto;}
+  /* Mock report-with-overlay */
+  .mock{position:relative;border:1px solid var(--line);border-radius:6px;
+    background:var(--bg);margin:14px 0;}
+  .mock .docpane{padding:18px 24px;padding-right:280px;min-height:320px;}
+  .mock .docpane h5{margin:14px 0 6px;font-size:15px;color:var(--fg);}
+  .mock .docpane .sec{padding:4px 6px;border-radius:4px;}
+  .mock .docpane .sec.flagged{background:var(--side-bg);cursor:pointer;}
+  .mock .docpane small{color:var(--muted);}
+  .gutter{position:absolute;top:18px;right:14px;width:250px;
+    display:flex;flex-direction:column;gap:10px;}
+  .side{font-size:12px;border-left:3px solid var(--accent);
+    background:var(--sidebg);padding:8px 10px;border-radius:0 4px 4px 0;}
+  .side.crit{border-left-color:var(--warn);}
+  .side .who{font-weight:600;color:var(--warn);}
+  .side .body{margin:4px 0;color:var(--fg);}
+  .side .acts{display:flex;gap:6px;flex-wrap:wrap;}
+  .side button{font-size:11px;padding:2px 8px;border:1px solid var(--line);
+    border-radius:999px;background:var(--bg);color:var(--fg);cursor:pointer;}
+  .side button.primary{background:var(--accent);color:white;border-color:var(--accent);}
+  .side button.danger{color:var(--err);}
+  .sev{display:inline-block;width:18px;height:18px;line-height:18px;
+    text-align:center;border-radius:50%;font-size:10px;font-weight:700;color:white;}
+  .sev-hi{background:var(--err);} .sev-md{background:#e36209;} .sev-lo{background:#57606a;}
+  hr{border:none;border-top:1px solid var(--line);margin:24px 0;}
+  details{margin:8px 0;}
+  summary{cursor:pointer;font-weight:600;}
+  .quote{font-style:italic;}
+  .small{font-size:12px;color:var(--muted);}
+  .note{background:var(--sidebg);border:1px solid var(--line);
+    border-radius:6px;padding:10px 14px;margin:12px 0;font-size:14px;}
+  .req{background:var(--code-bg);border:1px solid var(--line);
+    border-left:3px solid var(--accent);border-radius:4px;
+    padding:8px 12px;margin:8px 0;font-size:13px;}
+  .req-id{font-family:var(--font-mono);font-weight:700;color:var(--accent);}
+  @media print{
+    nav.toc{display:none;}
+    .wrap{display:block;padding:0;}
+    body{font-size:11pt;}
+    h2{page-break-before:auto;}
+    .mermaid{break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <h4>Spec 0001 · v6</h4>
+  <ol>
+    <li><a href="#framing">Framing</a></li>
+    <li><a href="#goals">Goals · Non-goals</a></li>
+    <li><a href="#arch">Architecture</a></li>
+    <li><a href="#forge">Forge (one critic)</a></li>
+    <li><a href="#A">A · Workspace &amp; init <span class="badge b-new">new</span></a></li>
+    <li><a href="#B">B · Guided Scout <span class="badge b-new">expanded</span></a></li>
+    <li><a href="#C">C · Interactive agents</a></li>
+    <li><a href="#D">D · HTML reports + critic overlay + send-back <span class="badge b-new">consolidated</span></a></li>
+    <li><a href="#mock">Mock-up · Scout report</a></li>
+    <li><a href="#E">E · Threads (incl. data) <span class="badge b-new">consolidated</span></a></li>
+    <li><a href="#F">F · Agentic engineering (incl. spec-driven) <span class="badge b-new">consolidated</span></a></li>
+    <li><a href="#G">G · Atlas — full tech spec (incl. write protocol) <span class="badge b-new">consolidated</span></a></li>
+    <li><a href="#H">H · Discovery engine</a></li>
+    <li><a href="#I">I · Skills &amp; plugins</a></li>
+    <li><a href="#cross">Cross-cutting</a></li>
+    <li><a href="#phasing">Phasing</a></li>
+    <li><a href="#decisions">Open decisions</a></li>
+    <li><a href="#risks">Risks</a></li>
+    <li><a href="#refs">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Spec 0001 — Helix: collaborative research orchestrator &amp; discovery engine</h1>
+<p>
+  <span class="badge b-draft">v6 · Draft</span>
+  <span class="badge b-new">since v5: one Scout Critic only · two-command init/new · interview-the-researcher · single-file HTML round-trip · consolidated 12 → 9 workstreams</span>
+</p>
+<div class="note">
+  <strong>Status:</strong> Draft (v6) for review; open decisions at the end.<br>
+  <strong>Changes since v5:</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li>Framing tightened: <strong>Helix is the whole system</strong> — Forge pipeline + Atlas + Snapshots — not just the orchestrator.</li>
+    <li>One critic only — after Scout (Workstream D). The other per-stage critics are dropped; the Scout Critic + Results Critic (verdict) is the discipline.</li>
+    <li>Workstream A split: <code>helix init</code> is run <em>once</em> after cloning the repo to create a workspace; a separate <code>helix new &lt;project&gt;</code> creates each per-project run root.</li>
+    <li>Workstream B now defines Scout's sub-phases as agent-parseable requirements (REQ-ids), with a mermaid flow and an "interview the researcher" pattern; a <strong>skip-to-full-Scout</strong> option exists at any point.</li>
+    <li>Workstream D: stage HTML reports now round-trip <em>without a sidecar</em> — kept/rejected critic annotations, comment threads, and researcher marks are embedded in the HTML itself; the gate prompt provides a clickable <code>file://</code> link.</li>
+    <li>Consolidated <strong>twelve workstreams → nine</strong>: D + I → D; H + J → E; E + K → F; old G + Atlas tech spec → G; L renamed H. No features lost.</li>
+    <li>More mermaid diagrams (A · B · D · E · F · G · H).</li>
+  </ul>
+  <strong>Owner:</strong> Adam.<br>
+  <strong>Relates to:</strong> the agent-driven inversion (<code>docs/agent-driven-pipeline.md</code>, commits <code>514f70c</code>, <code>2cb14df</code>).
+</div>
+<p class="small">
+  This is also the first entry in a new <code>docs/specs/</code> convention — Helix's own development becomes spec-driven (Workstream F). A spec is a short, reviewable contract written <em>before</em> code; numbered, append-only.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="framing">Framing</h2>
+<blockquote class="quote">
+  "The companies that make meaningful contributions to scientific progress won't just sell research copilots. They'll be AI-native discovery engines that work alongside researchers to propose and validate hypotheses."<br>
+  <span class="small">— Y Combinator, Request for Startups</span>
+</blockquote>
+<p>
+  <strong>Helix is the whole system</strong>: a <strong>Forge</strong> (the six-stage agent-driven pipeline), an <strong>Atlas</strong> (a typed, content-addressed knowledge base that compounds across projects), and <strong>Snapshots</strong> (a content-addressed DAG of every transition with branch / freeze / fork / resume). Together they make Helix a <strong>collaborative research orchestrator and discovery engine</strong> — it works <em>alongside</em> the researcher to <strong>propose and validate hypotheses</strong>, surface contradictions and gaps, and produce validated, reproducible artifacts.
+</p>
+<p>
+  The shape: data is a first-class concern at every stage (Workstream E). The pipeline is <strong>threaded</strong> — a small set of longitudinal artifacts (question/hypothesis, data, spec, plan, design, code organization, glossary) is created early and updated by every stage (Workstream E). Every stage emits a self-contained <strong>HTML report</strong> with an inline <strong>annotation overlay</strong> for the Scout Critic's notes and the researcher's send-back marks (Workstream D). The pipeline runs as disciplined agentic engineering — Constitution → spec → clarify → plan → tasks → implement → verify, with a Ubiquitous Language, TDD per task, and a Deep-Modules design bias (Workstream F). At the heart of it all sits an <strong>autonomous hypothesis loop</strong> (Workstream H) — propose → validate → revise — borrowed from the agentic-discovery literature (Sakana AI Scientist-v2, Google's AI co-scientist, FunSearch, Coscientist). The Atlas (Workstream G) is the cross-project knowledge base these artifacts feed into and discoveries accrete to.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="goals">Goals · Non-goals</h2>
+<h3>Goals</h3>
+<ul>
+  <li>Restore the Atlas as a true cross-project knowledge base (Workstream A + G).</li>
+  <li>Two-command lifecycle: <code>helix init</code> (workspace, once) + <code>helix new &lt;project&gt;</code> (per project).</li>
+  <li>Guided Scout with an "interview the researcher" loop and an explicit <em>completeness gate</em>; a skip-to-full-Scout always available.</li>
+  <li>Treat datasets as first-class artifacts: scout, plan, build, validate (Workstream E).</li>
+  <li>Make persistent artifacts ("threads") explicit and longitudinal (Workstream E).</li>
+  <li>One critic only (Scout Critic) — at the spec gate, where errors are cheapest to fix.</li>
+  <li>Every stage's report is a self-contained HTML with an embedded annotation overlay; round-trip is <em>single-file</em>.</li>
+  <li>Define the Atlas write protocol (actions + dedup gate + provenance) as part of the full Atlas spec.</li>
+  <li>Run the pipeline as spec-driven agentic engineering (Constitution, Clarify loop, tasks, TDD, Deep Modules, Ubiquitous Language).</li>
+  <li>Integrate Claude skills/plugins per their licenses.</li>
+</ul>
+<h3>Non-goals</h3>
+<ul>
+  <li>No return to server-side sampling or credentials.</li>
+  <li>No change to the sandbox model or the dependency-light core.</li>
+  <li>No automatic migration of data created since the self-rooting change.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="arch">Architecture at a glance</h2>
+<p>
+  Two roots: a shared <strong>workspace</strong> (the Atlas + the Constitution) and a per-project <strong>run root</strong> (snapshots / runs / pending / source folder). The agent <em>is</em> the model.
+</p>
+<div class="mermaid">
+flowchart LR
+  subgraph CC[Claude Code · the agent IS the model]
+    A[Agent]
+  end
+  subgraph WS[Workspace · shared cross-project root · helix init once]
+    AT[Atlas: sources · concepts · entities · projects/&lt;id&gt;]
+    CO[Constitution]
+  end
+  subgraph PR[Project · run root · helix new &lt;project&gt;]
+    SR[Source folder]
+    HE[.helix/ — snapshots · runs · pending]
+  end
+  A -- hx_step / hx_submit / hx_atlas_* --&gt; HELIX[Helix MCP server]
+  HELIX -- write/read --&gt; AT
+  HELIX -- write/read --&gt; HE
+  HELIX -- read --&gt; SR
+  HELIX -- read --&gt; CO
+  HELIX -- elicitation (gate) --&gt; A
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="forge">Forge with one critic</h2>
+<p>
+  Six stages with a <strong>single critic</strong> — after Scout, where errors are cheapest to fix (the spec is the source of truth; spec drift downstream is far more expensive than spec drift caught at scout-gate). The Validator is deterministic (no critic — it <em>is</em> the gate). Results Critic returns a verdict at the end (not a per-stage critique).
+</p>
+<div class="mermaid">
+flowchart LR
+  S[Scout] --&gt; SC[Scout Critic]
+  SC --&gt; P[Planner]
+  P --&gt; B[Builder · TDD task loop]
+  B --&gt; V[Validator · deterministic]
+  V --&gt; R[Results Critic · verdict]
+  R --&gt; END[done · iterate · send-back]
+  classDef crit fill:#fff8c5,stroke:#bf8700,color:#573a08;
+  classDef det  fill:#dafbe1,stroke:#1a7f37,color:#1a7f37;
+  class SC,R crit
+  class V det
+</div>
+<p class="small">
+  Why only one stage critic? The literature on critique loops (Self-Refine, Reflexion, Constitutional AI) is consistent that per-step critique inflates cost and risks loops on long-horizon tasks. With Helix's <strong>spec-as-source-of-truth</strong> discipline, the leverage point is at the spec — once the spec passes scout-critic review, downstream errors mostly become spec drift that surfaces in the Validator + Results Critic, where the existing send-back path handles them. References: <a href="https://arxiv.org/abs/2303.17651">Self-Refine</a>, <a href="https://arxiv.org/abs/2303.11366">Reflexion</a>, <a href="https://arxiv.org/abs/2212.08073">Constitutional AI</a>.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="A">Workstream A — Workspace &amp; init <span class="badge b-new">new</span></h2>
+
+<h3>Problem</h3>
+<p>
+  Today <code>helix init &lt;name&gt;</code> creates a per-project folder with its own <code>helix.toml</code> and <code>atlas/</code>, and the agent-driven <code>use_root(folder)</code> change bound the Atlas to that folder — so the Atlas became per-project (an isolated wiki per research project), breaking cross-project compounding. The fix is structural: <strong>split the init lifecycle in two</strong>.
+</p>
+
+<h3>Two-command lifecycle</h3>
+<table>
+  <thead><tr><th>Command</th><th>Run when</th><th>What it does</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td><code>helix init</code> (no args)</td><td><strong>Once</strong>, after cloning the Helix repo / installing the tool, to set up the workspace.</td><td>Creates the workspace marker (<code>helix.toml [workspace]</code>), the shared <code>atlas/</code> tree (with the inbox / raw / sources / concepts / entities / projects scaffolding), the <code>constitution.md</code> (elicits the small set of choices), and a <code>.mcp.json</code> for the workspace.</td><td>Current directory becomes the <strong>workspace root</strong>.</td></tr>
+    <tr><td><code>helix new &lt;project&gt;</code></td><td><strong>Per project</strong> the researcher wants to run.</td><td>Creates the project's <strong>run root</strong>: a source folder (<code>&lt;project&gt;/</code>), a <code>question.md</code> stub, a per-project <code>helix.toml</code> pointing at the workspace's Atlas (via the marker, not a brittle absolute path), an empty <code>.helix/</code> for snapshots / runs / pending, and optionally a per-project <code>constitution.md</code> override (Workstream F).</td><td>Subdir of (or pointed at) the workspace.</td></tr>
+  </tbody>
+</table>
+
+<div class="mermaid">
+flowchart LR
+  CLONE[git clone helix] --&gt; INIT[helix init · once]
+  INIT --&gt; WS[Workspace: atlas/ · constitution.md · helix.toml]
+  WS --&gt; NEW1[helix new project-A]
+  WS --&gt; NEW2[helix new project-B]
+  WS --&gt; NEW3[helix new project-C]
+  NEW1 --&gt; PA[project-A/ · source · .helix/]
+  NEW2 --&gt; PB[project-B/ · source · .helix/]
+  NEW3 --&gt; PC[project-C/ · source · .helix/]
+  PA -- shared --&gt; WS
+  PB -- shared --&gt; WS
+  PC -- shared --&gt; WS
+  PA --&gt; HXSTEP[hx_step · hx_submit · …]
+  PB --&gt; HXSTEP
+  PC --&gt; HXSTEP
+</div>
+
+<h3>Root resolution (the two-roots model)</h3>
+<table>
+  <thead><tr><th>Concern</th><th>Root</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Atlas (<code>sources/</code>, <code>concepts/</code>, <code>entities/</code>, <code>projects/&lt;id&gt;/</code>) + Constitution</td><td><strong>workspace</strong></td><td>the compounding cross-project knowledge base</td></tr>
+    <tr><td>Snapshots, run registry, pending step</td><td><strong>run</strong> (<code>use_root</code>)</td><td>per-project history; the self-rooting safety fix stays</td></tr>
+    <tr><td><code>hot://&lt;project&gt;</code></td><td>follows the Atlas</td><td>already project-namespaced under <code>atlas/projects/&lt;id&gt;/_hot.md</code></td></tr>
+  </tbody>
+</table>
+<p>
+  Internally: <code>config</code> gains <code>workspace_root()</code> distinct from <code>project_root()</code>. <code>atlas_path()</code> resolves against <code>workspace_root()</code>. <code>workspace_root()</code> walks up from the project folder (git-style) looking for a workspace marker (<code>helix.toml [workspace]</code> or a <code>.helix-workspace</code> file); falls back to <code>HELIX_HOME</code>; falls back to the run root.
+</p>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>A1</strong> Workspace marker file: <code>helix.toml [workspace]</code> (recommended; one file already exists per project) or a separate <code>.helix-workspace</code>.
+  <strong>A2</strong> Snapshots stay per-project (recommended) or keyed by project in the workspace.
+  <strong>A3</strong> Per-project command name: <code>helix new &lt;project&gt;</code> (recommended; npm/cargo-style) vs. <code>helix project new</code>.
+  <strong>A6</strong> Migration for per-project atlases created since the regression. Recommendation: document only; no auto-migration.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="B">Workstream B — Guided Scout: interview the researcher <span class="badge b-new">expanded</span></h2>
+<p>
+  Scout is a sequence of <strong>standardized sub-phases</strong>. The discipline is borrowed from <strong>"interview the developer"</strong> (Maximiliano Contieri's spec-driven dev pattern — <a href="https://maxicontieri.substack.com/p/ai-coding-tip-008-use-spec-driven">substack</a>) and <strong>Decision-Oriented Programming with Aporia</strong> (<a href="https://arxiv.org/abs/2604.05203">arXiv:2604.05203</a>, which reports ~5× / ~61% relative reduction in mental-model/implementation mismatch when decisions are elicited up front). For Helix's research context this becomes <strong>"interview the researcher"</strong>: structured Q&amp;A with a named question set before any model work begins.
+</p>
+
+<h3>The flow</h3>
+<div class="mermaid">
+flowchart TB
+  START[hx_step on a new project] --&gt; SKIPQ{Researcher: skip<br/>to full Scout?}
+  SKIPQ -- yes (confirmed via hx_ask) --&gt; FULL[Run full Scout autonomously]
+  SKIPQ -- no, walk me through it --&gt; FRAME[Frame · interview]
+  FRAME --&gt; Q1[Question: what are you investigating?<br/>multi-perspective elicitation · STORM]
+  Q1 --&gt; Q2[FINER: Feasible · Interesting · Novel · Ethical · Relevant]
+  Q2 --&gt; Q3[PICOT: Population · Intervention · Comparator · Outcome · Time]
+  Q3 --&gt; Q4[GQM: Goal → Questions → Metrics + validation bands]
+  Q4 --&gt; Q5[Data scout: candidate datasets · license · access]
+  Q5 --&gt; GATE{hx_question_check · completeness gate}
+  GATE -- fails · [NEEDS CLARIFICATION] open --&gt; CLAR[Clarify loop · one question at a time]
+  CLAR --&gt; GATE
+  GATE -- passes --&gt; SRC[Source · confirm inbox + existing sources]
+  SRC --&gt; LIT[Literature dive · WebSearch + Atlas + Elicit-style extraction]
+  LIT --&gt; SYN[Synthesize · consensus · contradictions · gaps]
+  SYN --&gt; SPEC[Spec · emit projects/&lt;id&gt;/spec.md]
+  SPEC --&gt; HAND[hand off to Scout Critic]
+  FULL --&gt; HAND
+  classDef gate fill:#fff8c5,stroke:#bf8700,color:#573a08;
+  classDef skip fill:#ddf4ff,stroke:#0550ae,color:#0550ae;
+  class GATE gate
+  class SKIPQ,FULL skip
+</div>
+
+<h3>Sub-phase requirements (agent-parseable)</h3>
+<p>Each requirement is a single sentence the Scout prompt must satisfy. Numeric IDs are stable so the spec and the prompt can reference them.</p>
+
+<h4>Skip-to-full-Scout (always available)</h4>
+<div class="req"><span class="req-id">REQ-B-SKIP-01</span> &nbsp; At the start of any sub-phase, the agent MUST offer the researcher a "skip the interview and run full Scout autonomously" option, and MUST proceed only after a positive confirmation via <code>hx_ask</code> (auditable). The skip is not auto-chosen even on <code>autonomy_until: scout</code>; the researcher's intent is required.</div>
+<div class="req"><span class="req-id">REQ-B-SKIP-02</span> &nbsp; If skipped, Scout runs end-to-end without the Frame / Source / Synthesize sub-phase questions, producing the spec, source-page writes, and the candidate-hypotheses thread in a single submit. The Scout Critic still runs at the gate.</div>
+
+<h4>Frame — interview the researcher</h4>
+<div class="req"><span class="req-id">REQ-B-FRAME-01</span> &nbsp; If <code>question.md</code> is empty or sparse, the agent MUST conduct a multi-perspective elicitation (STORM-style perspective prompts) via <code>hx_ask</code> before any literature work.</div>
+<div class="req"><span class="req-id">REQ-B-FRAME-02</span> &nbsp; The sharpened <code>question.md</code> MUST carry a typed YAML frontmatter scoring three canonical research-question frameworks: <strong>FINER</strong> (Feasible · Interesting · Novel · Ethical · Relevant), <strong>PICOT</strong> (Population · Intervention · Comparator · Outcome · Time), and <strong>GQM</strong> (Goal → Questions → Metrics).</div>
+<div class="req"><span class="req-id">REQ-B-FRAME-03</span> &nbsp; Every unresolved point MUST be marked in the body with the literal placeholder <code>[NEEDS CLARIFICATION: …]</code> (Spec Kit pattern). The agent MUST NOT advance past Frame while any marker remains.</div>
+<div class="req"><span class="req-id">REQ-B-FRAME-04</span> &nbsp; Each elicitation MUST be a single named question (free-form chat is not auditable); answers MUST be persisted as part of the Decision Card and the snapshot.</div>
+
+<h4>Data scout (J → here, see Workstream E)</h4>
+<div class="req"><span class="req-id">REQ-B-DATA-01</span> &nbsp; The Frame interview MUST include at least one named question per candidate dataset: source · license · size · format · access · suitability · limitations. Each candidate dataset MUST be recorded as an Atlas entity page (<code>entities/datasets/&lt;slug&gt;.md</code>).</div>
+
+<h4>Completeness gate (the named contract)</h4>
+<div class="req"><span class="req-id">REQ-B-GATE-01</span> &nbsp; A new tool <code>hx_question_check(folder)</code> MUST validate the <code>question.md</code> frontmatter against the schema below and refuse to advance Scout while any field is unresolved or any <code>[NEEDS CLARIFICATION]</code> remains in the body.</div>
+<div class="req"><span class="req-id">REQ-B-GATE-02</span> &nbsp; The gate-pass MUST be confirmed by the researcher via <code>hx_ask</code> elicitation; <code>gate.by</code> and <code>gate.at</code> MUST be filled in the frontmatter and travel with the snapshot.</div>
+<div class="req"><span class="req-id">REQ-B-GATE-03</span> &nbsp; The Clarify loop (Workstream F · K.3) MUST be the recovery path on gate failure: one open marker resolved per turn via <code>hx_ask</code>, then re-check.</div>
+
+<pre><code>---  # projects/&lt;id&gt;/question.md frontmatter (the gate's contract)
+finer:          { feasible, interesting, novel, ethical, relevant }   # 1-sentence rationale or "n/a: &lt;reason&gt;"
+picot:          { population, intervention, comparator, outcome, time }
+gqm:            [{ goal, questions: [...], metrics: [...] }]           # ≥ 1 tree
+datasets:       [{ slug, source, license, size, format, access, suitability, limitations }]
+open_questions: []                                                     # ALL [NEEDS CLARIFICATION] markers resolved
+gate:           { passed: false, by: "", at: "" }
+---</code></pre>
+
+<h4>Source · Literature dive · Synthesize · Spec</h4>
+<div class="req"><span class="req-id">REQ-B-SRC-01</span> &nbsp; <em>Gated</em> on Frame's pass. The agent MUST confirm the inbox contents and any researcher-provided sources via <code>hx_ask</code> before the literature dive.</div>
+<div class="req"><span class="req-id">REQ-B-LIT-01</span> &nbsp; The agent MUST use its own web tools (WebSearch · WebFetch) plus the Atlas to do a real survey. Results MUST land as typed Atlas pages with an Elicit-style structured-extraction frontmatter (claim · evidence · method · sample · limitations — <a href="https://elicit.com/blog/systematic-review/">Elicit pattern</a>).</div>
+<div class="req"><span class="req-id">REQ-B-SYN-01</span> &nbsp; The agent MUST identify consensus, contradictions and gaps across sources + the web, and record each as an Atlas page (per Workstream G's action vocabulary).</div>
+<div class="req"><span class="req-id">REQ-B-SPEC-01</span> &nbsp; The agent MUST emit <code>projects/&lt;id&gt;/spec.md</code> (Workstream F): sharpened question, scope, success criteria + validation bands, constraints, known contradictions/gaps, dataset requirements (E), candidate hypotheses (Workstream H), and the definition of value/done.</div>
+
+<p>
+  The whole loop is <strong>exploratory → narrow</strong>: each sub-phase can iterate with the researcher before advancing. Implementation is prompt-level (the Scout agent gains the sub-phase checklist + the elicitation tools), plus a small spec-file writer and <code>hx_question_check</code>.
+</p>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>B1</strong> Number of standard interview questions per sub-phase: a tight 6-question minimum (recommended) vs. an unbounded "until satisfied" loop.
+  <strong>B2</strong> Skip-to-full confirmation: single <code>hx_ask</code> (recommended) vs. typed phrase ("yes, skip") to avoid accidental skip.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="C">Workstream C — Interactive agents (ask the user anywhere)</h2>
+<p>
+  Every stage prompt explicitly permits the agent to ask the researcher for clarification before submitting. A thin tool <code>hx_ask(question, schema?)</code> round-trips a structured question through the existing <code>io.elicit</code> seam and <strong>records</strong> the Q&amp;A in the snapshot, so important clarifications are auditable.
+</p>
+<p>
+  Both modes ship: free chat-level questions for casual ambiguity; <code>hx_ask</code> for anything that should be recorded in the run history. Answers refine the appropriate <strong>threads</strong> (Workstream E) and appear in the stage report (Workstream D). Workstream B's Frame interview is the canonical example of named-question-set elicitation.
+</p>
+<h4>Open decision</h4>
+<p>
+  <strong>C4</strong> Interactive clarification: prompt-only chat vs. always-recorded <code>hx_ask</code>. Recommendation: both; <code>hx_ask</code> for anything that should be recorded.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="D">Workstream D — HTML reports + critic overlay + send-back <span class="badge b-new">consolidated · supersedes old I</span></h2>
+<p>
+  Each stage emits a self-contained HTML report at <code>projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code>, overwritten on every (re-)run. The single critic (Scout Critic) — and any researcher annotations — live <strong>inside the HTML file itself</strong>, as embedded JSON read and written by a small inline JS overlay. The HTML is the round-trip unit: one file in, one file back.
+</p>
+
+<h3>Round-trip data flow</h3>
+<div class="mermaid">
+flowchart LR
+  R[Stage emits HTML] --&gt; EMB[Embedded data:<br/>· report content<br/>· critic annotations<br/>· researcher comments<br/>· kept/rejected state]
+  EMB --&gt; LINK[Gate prompt:<br/>clickable file:// link]
+  LINK --&gt; BR[Researcher opens in browser]
+  BR --&gt; UI[Overlay UI · Accept · Reject · Reply · Comment · Send back]
+  UI --&gt; UPD[Update embedded JSON in-place<br/>via File System Access API<br/>or 'Download annotated copy']
+  UPD --&gt; SEND[hx_report_send_back parses the HTML]
+  SEND --&gt; FB[Re-run feedback:<br/>· kept annotations<br/>· rejected annotations + reasons<br/>· replies on annotations<br/>· researcher's own comments<br/>· previous report]
+  FB --&gt; RE[Stage agent re-renders the HTML]
+</div>
+
+<h3>The "single HTML file is the unit" tech</h3>
+<table>
+  <thead><tr><th>Concern</th><th>How it's done — with just HTML</th></tr></thead>
+  <tbody>
+    <tr><td>Where the data lives</td><td>Inside the HTML, in a <code>&lt;script type="application/json" id="hx-annotations"&gt;…&lt;/script&gt;</code> block. Conforms to the <strong>W3C Web Annotation Data Model</strong> (<a href="https://www.w3.org/TR/annotation-model/">W3C TR</a>): each annotation has a <code>body</code>, a <code>target</code> with <code>FragmentSelector</code> + <code>TextQuoteSelector</code> + <code>TextPositionSelector</code> (Hypothes.is-style <a href="https://web.hypothes.is/blog/fuzzy-anchoring/">fuzzy anchoring</a>), plus a Helix-specific <code>state</code> (<code>open</code> · <code>accepted</code> · <code>rejected</code> · <code>replied</code>) and the actor/timestamp log.</td></tr>
+    <tr><td>How the overlay reads/writes</td><td>A tiny self-contained JS bundle (inlined by the renderer) reads the JSON on load, paints the side-notes (Distill-style — <a href="https://distill.pub/guide/">Distill</a>), and on every action updates the JSON in the DOM <strong>and on disk</strong> via the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/showSaveFilePicker"><strong>File System Access API</strong></a> (<code>window.showSaveFilePicker</code> · Chromium browsers). Non-Chromium fallback: a <em>Download annotated copy</em> button writes a fresh HTML the researcher drops back in the project folder.</td></tr>
+    <tr><td>Researcher actions per annotation</td><td><strong>Accept</strong>, <strong>Reject</strong> (with optional reason), <strong>Reply</strong> (Google-Docs-style threaded comment — <a href="https://support.google.com/docs/answer/65129">Docs comments help</a>), <strong>Send back to stage</strong> (the new one-click send-back). All resolution events go into the in-page log.</td></tr>
+    <tr><td>Researcher's own comments / suggested edits</td><td>Selecting any text in the report exposes <strong>Add comment</strong> and <strong>Suggest edit</strong>. The latter materialises as a <a href="https://fletcher.github.io/MultiMarkdown-6/syntax/critic.html"><strong>CriticMarkup</strong></a> patch (<code>{++add++}</code> / <code>{--del--}</code> / <code>{~~old~&gt;new~~}</code>) — Google Docs' <a href="https://support.google.com/docs/answer/6033474">Suggesting mode</a> applied to a static HTML target.</td></tr>
+    <tr><td>How the gate is presented</td><td>The gate prompt the researcher sees in the chat is the report's <em>Summary</em> + the count of unresolved annotations + a <strong>clickable <code>file:///&lt;abs-path&gt;/reports/&lt;stage&gt;.html</code> link</strong> (most modern terminals + Claude Code render <code>file://</code> URLs as clickable). For non-clickable terminals a "Open report" command is suggested.</td></tr>
+    <tr><td>What the next-run agent sees</td><td><code>hx_report_send_back(project, stage)</code> parses the modified HTML, extracts the embedded JSON, and emits a <code>goto &lt;stage&gt;</code> with a structured feedback bundle: <strong>kept critic annotations</strong> (still-open items the researcher chose not to reject) · <strong>rejected critic annotations + their reasons</strong> (so the agent doesn't reintroduce them) · <strong>replies on critic annotations</strong> · <strong>researcher's own comments + suggested edits</strong> · the <strong>previous report's HTML</strong> as context. The stage re-renders the report and the cycle continues.</td></tr>
+  </tbody>
+</table>
+
+<h3>Per-agent HTML templates (industry-shaped, with diagrams where appropriate)</h3>
+<p>
+  Each template is the smallest section set the surveyed literature treats as the standard for that kind of document. Fixed top-level sections so the reader skip-scans and an editor knows exactly where to add content. The HTML rendering adds capabilities markdown can't carry: anchored TOC + stable section IDs, Distill-style side-notes, sortable/filterable tables, citation tooltips, confidence/verdict badges, a small mermaid pipeline strip showing the stage's place in the run, dark mode and a print stylesheet.
+</p>
+<table>
+  <thead><tr><th>Agent</th><th>Template</th><th>Diagrams / illustrations used (tactfully)</th><th>Key sections</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Scout</strong></td><td><strong>IMRaD</strong> + <strong>PRISMA</strong>-flow appendix (<a href="https://libguides.umn.edu/StructureResearchPaper">UMN</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC8007028/">PRISMA 2020</a>)</td><td>PRISMA flow as a mermaid sankey · candidate hypothesis tree · contradiction map (graph) · per-source extraction grid</td><td>Introduction · Methods (search strategy) · Results (synthesis · contradictions · gaps) · Discussion · PRISMA flow · References</td></tr>
+    <tr><td><strong>Scout Critic</strong></td><td><strong>Blameless post-incident review</strong> (<a href="https://sre.google/sre-book/postmortem-culture/">Google SRE</a>)</td><td>(annotations live as overlay side-notes on the Scout HTML — no separate page)</td><td>Summary · Impact on the spec · Root causes · Recommendations · What went well · What went wrong · Action items</td></tr>
+    <tr><td><strong>Planner</strong></td><td><strong>Rust RFC</strong> (<a href="https://github.com/rust-lang/rfcs/blob/master/0000-template.md">rfc 0000-template</a>)</td><td>Mermaid plan-as-DAG of tasks · alternatives side-by-side · data flow for the planned validation</td><td>Motivation · Guide-level · Reference-level · Drawbacks · Rationale &amp; alternatives · Prior art · Unresolved · Future possibilities</td></tr>
+    <tr><td><strong>Builder</strong></td><td><strong>MADR</strong> (<a href="https://github.com/adr/madr">adr/madr</a>) + PR-style checklist</td><td>Module diagram (deep-modules call-out) · test pyramid · per-task TDD flow</td><td>Context · Decision drivers · Considered options · Decision outcome · Consequences · Pros &amp; Cons · PR-style checklist</td></tr>
+    <tr><td><strong>Validator</strong></td><td><strong>IMRaD</strong> Methods/Results + checklist</td><td>Per-band pass/fail bar chart · validation pipeline as mermaid · hard/soft flag summary</td><td>Methods (what was checked) · Results (per-band pass/fail) · Hard flags · Soft flags · Pointers to artifacts</td></tr>
+    <tr><td><strong>Results Critic</strong></td><td><strong>Blameless PIR</strong> + verdict</td><td>Verdict badge · per-hypothesis support/refutation table (with bars) · regression-to-spec mermaid</td><td>Summary · Impact on the spec · Root causes · What went well · What went wrong · Action items · Verdict (<code>ship</code> · <code>iterate</code>)</td></tr>
+  </tbody>
+</table>
+
+<h3>One canonical report per stage; lint enforces</h3>
+<p>
+  Each report writes to <code>projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code> and is overwritten on every (re-)run of that stage. History is the snapshot DAG; the Atlas page is the current view. The Decision Card stays the structured backbone — present in every snapshot — and a renderer projects it into the per-agent template, then emits self-contained HTML (Quarto's <code>embed-resources: true</code> pattern — <a href="https://quarto.org/docs/output-formats/html-publishing.html">Quarto</a>; <a href="https://pandoc.org/MANUAL.html">Pandoc <code>--embed-resources</code></a>). Lint adds a <strong><code>stale-report</code></strong> check: any file under <code>projects/&lt;id&gt;/reports/</code> that doesn't match the canonical <code>&lt;stage&gt;.html</code> name, or whose stage didn't run on the latest snapshot path, is flagged with a one-click fix to delete or re-render.
+</p>
+
+<h3>Round-trip patterns (unchanged from v4)</h3>
+<ul>
+  <li><strong>Frontmatter-driven form</strong> for structured fields (status · threads touched · verdict · links · spec refs) — pattern after Astro content collections (<a href="https://docs.astro.build/en/guides/content-collections/">Astro</a>) and Obsidian Bases (<a href="https://help.obsidian.md/bases">Bases</a>).</li>
+  <li><strong><code>[NEEDS CLARIFICATION: …]</code></strong> as literal in-text markers — Spec Kit's pattern (<a href="https://github.com/github/spec-kit/blob/main/spec-driven.md">spec-driven.md</a>).</li>
+  <li><strong>Stable anchored headings</strong>; agents edit one section without touching others.</li>
+  <li><strong>Anchored SEARCH/REPLACE</strong> block edits for agent-authored amendments — Aider's format (<a href="https://aider.chat/docs/more/edit-formats.html">Aider edit formats</a>).</li>
+  <li><strong>Supertag-style stamps, not bindings</strong> (Tana supertags · Notion DB templates).</li>
+  <li><strong><code>AGENTS.md</code></strong> as the per-stage agent-context surface — Linux Foundation Agentic AI Foundation open standard (<a href="https://agents.md/">agents.md</a>, <a href="https://github.blog/ai-and-ml/github-copilot/how-to-write-a-great-agents-md-lessons-from-over-2500-repositories/">GitHub blog</a>).</li>
+  <li><strong>Sandboxed-diff round-trips</strong> — Plandex's "cumulative diff review sandbox" (<a href="https://github.com/plandex-ai/plandex">plandex</a>); Helix already snapshots per stage.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>D-1</strong> Canonical page per stage (recommended) vs. per-attempt suffixed by snapshot id.
+  <strong>D-2</strong> Server-side HTML emit (recommended) vs. JSON + client SPA.
+  <strong>D-3</strong> Annotations embedded in the HTML (recommended; single-file round-trip) vs. a separate <code>.annotations.json</code> sidecar.
+  <strong>D-4</strong> Round-trip mechanism: File System Access API (recommended, with Download-annotated-copy fallback) vs. always-Download.
+  <strong>D-5</strong> Gate-prompt link form: <code>file://</code> URL (recommended) vs. <code>helix://</code> custom scheme + handler.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="mock">Mock-up — Scout report with a critic side-note</h2>
+<p>Illustrative only — the actual renderer emits this shape per the per-agent template, with the overlay JS inlined.</p>
+<div class="mock" aria-label="Mock Scout HTML report with side-note overlay">
+  <div class="docpane">
+    <p class="small"><strong>Scout</strong> &nbsp;·&nbsp; project <code>orthobp</code> &nbsp;·&nbsp; <span class="badge b-new">latest</span> &nbsp;·&nbsp; 3 annotations · 1 unresolved</p>
+    <h5>Introduction</h5>
+    <div class="sec">Cuffless smartphone-based blood-pressure (BP) estimation from facial rPPG + fingertip PPG + IMU. The literature is fragmented: regression-style approaches dominate, with physics-informed models a growing minority…</div>
+    <h5>Methods · search strategy</h5>
+    <div class="sec flagged" id="scout-methods">PubMed + arXiv search, 2018–2026, query terms: <em>"rPPG" AND ("BP" OR "blood pressure")</em>; 138 hits, 41 abstracts screened, 12 included after full-text review.</div>
+    <h5>Results · candidate hypotheses</h5>
+    <div class="sec" id="scout-hyps">
+      <ol>
+        <li><strong>H1</strong> — Pulse-transit time (PTT) from face↔fingertip predicts systolic BP within ±10 mmHg in a within-subject design.</li>
+        <li><strong>H2</strong> — A physics-informed hybrid (PTT prior + ML residual) outperforms pure ML on hold-out subjects.</li>
+        <li><strong>H3</strong> — Active-stand-induced ΔBP is recoverable from short (≤60 s) rPPG segments using HRV-derived features.</li>
+      </ol>
+    </div>
+    <h5>Discussion · contradictions &amp; gaps</h5>
+    <div class="sec flagged" id="scout-gaps">Inconsistent reporting of validation bands across studies; few open datasets paired with ground-truth BP and IMU; little prior work on the active-stand paradigm with smartphone-only sensing.</div>
+    <h5>PRISMA flow</h5>
+<pre><code>Identified  138
+Screened     41
+Eligible     17
+Included     12</code></pre>
+    <small>Self-contained HTML; Distill-style side-notes in the margin →</small>
+  </div>
+  <div class="gutter">
+    <div class="side crit">
+      <span class="who"><span class="sev sev-md">M</span> Scout Critic · open</span>
+      <div class="body">PRISMA flow numbers don't add up: 138 → 41 → 17 → 12. The "Screened → Eligible" delta (24) is unexplained.</div>
+      <div class="acts">
+        <button class="primary">Accept</button>
+        <button>Reject</button>
+        <button>Reply</button>
+        <button class="danger">Send back ↩</button>
+      </div>
+    </div>
+    <div class="side crit">
+      <span class="who"><span class="sev sev-hi">H</span> Scout Critic · accepted ✓</span>
+      <div class="body">H3 (active-stand) lacks a falsification condition — flag for the spec; cannot validate as written.</div>
+      <div class="acts">
+        <button>Re-open</button>
+      </div>
+    </div>
+    <div class="side">
+      <span class="who">You · suggestion</span>
+      <div class="body"><code>{~~OOD subjects~&gt;hold-out subjects~~}</code> in H2 — terminology should match the glossary.</div>
+      <div class="acts">
+        <button class="primary">Apply</button>
+        <button>Dismiss</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="E">Workstream E — Threads (incl. data as a first-class thread) <span class="badge b-new">consolidated from H + J</span></h2>
+<p>
+  A <strong>thread</strong> is a persistent, evolving artifact that spans the pipeline. Each thread has a typed home in the Atlas, a current state, a history (via snapshots), and a small status machine (<code>Proposed → Accepted → Superseded</code>). Stages contribute updates to relevant threads; the report (Workstream D) declares which threads were touched. The pattern is borrowed from ADRs as <a href="https://adr.github.io/">living documents</a>, design-rationale / IBIS (<a href="https://en.wikipedia.org/wiki/Issue-based_information_system">Wikipedia</a>), and Graphiti's temporally-versioned facts (<a href="https://arxiv.org/abs/2501.13956">arXiv:2501.13956</a>).
+</p>
+
+<h3>Threads timeline</h3>
+<div class="mermaid">
+flowchart LR
+  subgraph Frame[Scout · Frame]
+    Q[Question/hypothesis · created]
+    D[Data · created]
+    G[Glossary · seeded]
+  end
+  subgraph Spec[Scout · Spec]
+    S[Spec · created]
+  end
+  subgraph Pl[Planner]
+    P[Plan · created]
+    DE[Design · created]
+    D2[Data plan · updated]
+  end
+  subgraph Bu[Builder]
+    CO[Code-org · created]
+    D3[Data built · updated]
+    DE2[Design · refined]
+  end
+  subgraph Va[Validator]
+    D4[Data validated · updated]
+  end
+  subgraph Rc[Results Critic]
+    Q2[Hypothesis · verdict per hypothesis]
+    S2[Spec · iterated on send-back]
+  end
+  Frame --&gt; Spec --&gt; Pl --&gt; Bu --&gt; Va --&gt; Rc
+</div>
+
+<h3>Initial threads</h3>
+<table>
+  <thead><tr><th>Thread</th><th>First created by</th><th>Updated by</th><th>Atlas path</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Question / hypothesis</strong></td><td>Scout (Frame)</td><td>Scout, Scout Critic, Results Critic</td><td><code>projects/&lt;id&gt;/threads/hypothesis.md</code></td></tr>
+    <tr><td><strong>Data</strong></td><td>Scout (data sub-phase, REQ-B-DATA-01)</td><td>Planner, Builder, Validator</td><td><code>projects/&lt;id&gt;/threads/data.md</code> + <code>entities/datasets/&lt;slug&gt;/</code></td></tr>
+    <tr><td><strong>Spec</strong></td><td>Scout (final sub-phase)</td><td>every stage on send-back</td><td><code>projects/&lt;id&gt;/spec.md</code></td></tr>
+    <tr><td><strong>Plan</strong></td><td>Planner</td><td>Planner (revisions), Builder</td><td><code>projects/&lt;id&gt;/plan.md</code></td></tr>
+    <tr><td><strong>Design</strong></td><td>Planner / Builder</td><td>Builder, Results Critic</td><td><code>projects/&lt;id&gt;/threads/design.md</code></td></tr>
+    <tr><td><strong>Code organization</strong></td><td>Builder</td><td>Builder (refactors)</td><td><code>projects/&lt;id&gt;/threads/code-org.md</code></td></tr>
+    <tr><td><strong>Glossary (Ubiquitous Language)</strong></td><td>Scout (literature dive seeds it)</td><td>every stage</td><td><code>projects/&lt;id&gt;/threads/glossary.md</code> (+ <code>concepts/glossary/&lt;term&gt;.md</code> at workspace level)</td></tr>
+  </tbody>
+</table>
+<p>
+  Each thread lives at a known Atlas path with a versioned section per snapshot. A resource <code>thread://&lt;project&gt;/&lt;name&gt;</code> reads the current state; <code>thread://&lt;project&gt;/&lt;name&gt;?at=&lt;snap&gt;</code> reads it at a snapshot (Graphiti bi-temporal model). Lint adds <strong><code>orphan-thread</code></strong> (a thread expected at this stage but missing).
+</p>
+
+<h3>Data as a first-class thread</h3>
+<p>
+  Across the surveyed agentic-research systems (STORM, Sakana <strong>AI Scientist-v2</strong> — <a href="https://arxiv.org/abs/2504.08066">arXiv:2504.08066</a>, Elicit, OpenAI <strong>Deep Research</strong> — <a href="https://openai.com/index/introducing-deep-research/">openai.com</a>), <strong>datasets are treated as fixed inputs</strong>. For computational research that is a hole. Helix makes data a first-class artifact, tied to the data thread, with per-stage instructions:
+</p>
+<table>
+  <thead><tr><th>Stage</th><th>Data-aware sub-instruction</th></tr></thead>
+  <tbody>
+    <tr><td>Scout</td><td><strong>Data scout</strong>: identify candidate datasets; record each as <code>entities/datasets/&lt;slug&gt;.md</code> with <code>{source, license, size, format, access, suitability, limitations}</code>; flag access constraints.</td></tr>
+    <tr><td>Scout Critic</td><td>Critique data choice vs. the question; flag unsuitable datasets in the overlay.</td></tr>
+    <tr><td>Planner</td><td><strong>Data plan</strong>: which datasets, preprocessing, splits, ground-truth, validation bands tied to data.</td></tr>
+    <tr><td>Builder</td><td><strong>Data build</strong>: scripts that fetch/transform/version the data; the built/curated dataset is a versioned artifact with a hash; partial datasets are snapshots on the data thread.</td></tr>
+    <tr><td>Validator</td><td>Deterministic checks against the data spec (schema, splits respected, bands met).</td></tr>
+    <tr><td>Results Critic</td><td>Generalization, leakage, fairness checks tied to the data thread.</td></tr>
+  </tbody>
+</table>
+<p>Lint adds <strong><code>dataset-without-license</code></strong> and <strong><code>dataset-without-source</code></strong>.</p>
+
+<h4>Open decision</h4>
+<p>
+  <strong>E1</strong> Thread schema (front matter + status machine). Recommendation: each thread is an Atlas page with front matter <code>{thread, status, opened_at, last_touched_at, contributors}</code> + a body of sectioned per-snapshot updates.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="F">Workstream F — Agentic engineering (incl. spec-driven) <span class="badge b-new">consolidated from E + K</span></h2>
+<p>
+  The pipeline runs as a disciplined agentic-engineering practice: a <strong>Constitution</strong> establishes non-negotiables; a <strong>Spec → Clarify → Plan → Tasks → Implement → Verify</strong> loop replaces ad-hoc prompting; a <strong>Ubiquitous Language</strong> keeps every stage aligned; <strong>TDD</strong> paces the Builder; a <strong>Deep-Modules</strong> design bias keeps the system from sprawling. This is the synthesis of DDD, TDD, APoSD + GitHub's <strong>Spec Kit</strong> flow.
+</p>
+
+<h3>Spec Kit's commands, mapped to Helix stages</h3>
+<div class="mermaid">
+flowchart LR
+  CO[/constitution/<br/>hx_constitution_init at helix init] --&gt; SP[/specify/<br/>Scout · Spec sub-phase]
+  SP --&gt; CL[/clarify/<br/>hx_clarify · loop · gates the next phase]
+  CL --&gt; PL[/plan/<br/>Planner]
+  PL --&gt; TA[/tasks/<br/>Planner sub-phase → tasks.md]
+  TA --&gt; IM[/implement/<br/>Builder · TDD per task]
+  IM --&gt; VE[verify<br/>Validator + Results Critic vs. spec]
+</div>
+<p>
+  The discipline is <strong>"spec is the source of truth, not the code"</strong> — when drift is detected mid-Builder, the run <strong>goes back</strong> (existing send-back) to amend the spec first, and the drift itself becomes an <strong>explicit follow-up task appended to <code>tasks.md</code></strong> (not a hand-wave or an in-place patch). References: <a href="https://github.com/github/spec-kit/blob/main/spec-driven.md">Spec Kit</a>, <a href="https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html">Fowler — Understanding SDD</a>, <a href="https://maxicontieri.substack.com/p/ai-coding-tip-008-use-spec-driven">Contieri</a>, <a href="https://aider.chat/2024/09/26/architect.html">Aider architect/editor split</a>.
+</p>
+
+<h3>F.1 — Constitution (workspace-level non-negotiables)</h3>
+<p>
+  Before any stage runs, a <strong>Constitution</strong> is established as a <em>workspace-level</em> artifact <code>&lt;workspace&gt;/constitution.md</code>, with an optional per-project override at <code>projects/&lt;id&gt;/constitution.md</code>. It captures the project's <em>non-negotiables</em>: language(s), framework, testing approach, architectural style, definition of done. Pattern after Spec Kit's <code>memory/constitution.md</code>. The Constitution is part of every agent's prompt context; stages re-read it at the start of their turn. <code>hx_constitution_init</code> runs at <code>helix init</code> (Workstream A) and elicits the small set of choices that populate the file; later edits are normal markdown.
+</p>
+
+<h3>F.2 — Spec (the source of truth)</h3>
+<p>
+  Scout emits <code>projects/&lt;id&gt;/spec.md</code> (Workstream B). Planner derives the plan <em>from</em> it, Builder builds <em>to</em> it, Validator + Results Critic validate <em>against</em> it. Spec changes are a normal send-back. The spec contents match the canonical list — goals, scope, constraints, acceptance criteria, validation (<a href="https://addyo.substack.com/p/how-to-write-a-good-spec-for-ai-agents">Osmani — How to write a good spec for AI agents</a>). Helix's own development is also spec-driven: this document is <code>0001</code> in <code>docs/specs/</code>; numbered, append-only, written before code.
+</p>
+
+<h3>F.3 — Clarify loop</h3>
+<p>
+  <code>hx_clarify(project)</code> scans the spec and any thread the spec depends on for <code>[NEEDS CLARIFICATION: …]</code> markers and other ambiguity signals, asks the researcher one at a time via <code>hx_ask</code> (Workstream C), and patches the spec in place with anchored SEARCH/REPLACE edits. The spec advances only when no markers remain. This operationalises the <em>Decision-Oriented Programming with Aporia</em> finding — <a href="https://arxiv.org/abs/2604.05203">arXiv:2604.05203</a> — that structured up-front decision elicitation reduces mental-model/implementation mismatch by ~5× (~61% relative).
+</p>
+
+<h3>F.4 — Ubiquitous Language (the glossary thread)</h3>
+<p>
+  A <strong>Ubiquitous Language</strong> (Evans, DDD — <a href="https://martinfowler.com/bliki/UbiquitousLanguage.html">Fowler bliki</a>, <a href="https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf">DDD Reference PDF</a>, <a href="https://agilealliance.org/glossary/ubiquitous-language/">Agile Alliance</a>, <a href="https://www.infoq.com/minibooks/domain-driven-design-quickly/">InfoQ — DDD Quickly</a>) is a single shared vocabulary used by domain, spec, plan, and code. In Helix it is realised as a thread (E): a glossary page maintained at <code>projects/&lt;id&gt;/threads/glossary.md</code> with one term per heading, a one-sentence definition, aliases, and links to the concepts/sources that define it. Workspace-level shared terms live at <code>&lt;workspace&gt;/atlas/concepts/glossary/&lt;term&gt;.md</code>. Scout seeds the glossary from the literature dive; every later stage's prompt includes it; lint adds <strong><code>vocabulary-drift</code></strong> for terms used in spec/plan/code not in the glossary.
+</p>
+
+<h3>F.5 — TDD as the Builder's task loop</h3>
+<p>
+  The Builder runs one task from <code>tasks.md</code> at a time, in a <strong>red / green / refactor</strong> cycle aligned to Kent Beck's "Augmented Coding" (<a href="https://tidyfirst.substack.com/p/augmented-coding-beyond-the-vibes">tidyfirst</a>, <a href="https://newsletter.pragmaticengineer.com/p/tdd-ai-agents-and-coding-with-kent">Pragmatic Engineer interview</a>, <a href="https://engineeringharmony.com/how-test-driven-development-accelerates-ai-coding/">Engineering Harmony — How TDD accelerates AI coding</a>). Per task: pick → write the failing test first → implement just enough to pass → refactor → snapshot per task. Guardrails: per-task iteration cap deferring to the budget ceiling; the Builder refuses submissions that disable tests, skip the test-first step, or batch multiple tasks; <code>autonomy_until</code> relaxes interactivity but not the test-first invariant.
+</p>
+
+<h3>F.6 — Deep-Modules design bias</h3>
+<p>
+  Both the Planner's prompt and the Builder's self-check rubric prefer <strong>deep modules</strong>: small public interfaces hiding substantial implementations (Ousterhout, <em>A Philosophy of Software Design</em> — <a href="https://web.stanford.edu/~ouster/cgi-bin/aposd.php">book</a>, <a href="https://newsletter.pragmaticengineer.com/p/the-philosophy-of-software-design">Pragmatic Engineer interview</a>). Apply <em>design it twice</em>: produce two structurally distinct plans for the same spec and choose between them with explicit trade-offs (fits naturally in the Rust-RFC <em>Rationale &amp; alternatives</em> section, D).
+</p>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>F-1</strong> Constitution location: workspace-level (recommended; matches Spec Kit) vs. per-project only.
+  <strong>F-2</strong> <code>/clarify</code> hard gate (recommended) vs. advisory.
+  <strong>F-3</strong> <code>tasks.md</code> generated by a Planner sub-phase (recommended) vs. its own stage.
+  <strong>F-4</strong> Glossary thread: workspace + project (recommended) vs. project-only.
+  <strong>F-5</strong> TDD strictness: hard by default (recommended) with explicit Constitution opt-out vs. soft.
+  <strong>F-6</strong> Spec gate: advisory (recommended; reports declare advancement) vs. enforced hard gate.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="G">Workstream G — Atlas: full technical spec (incl. write protocol) <span class="badge b-new">consolidated</span></h2>
+<p>
+  The Atlas is Helix's <strong>typed, content-addressed wiki + knowledge graph that compounds across research projects</strong>. Atomic markdown pages (Andy Matuschak — <a href="https://notes.andymatuschak.org/Evergreen_notes_should_be_atomic">Evergreen notes should be atomic</a>); wikilinks + backlinks (Obsidian — <a href="https://help.obsidian.md/properties">Properties</a>, <a href="https://help.obsidian.md/bases">Bases</a>); tier-based curation (Zettelkasten); closed-set write protocol (mem0 ADD/UPDATE/DELETE/NOOP — <a href="https://arxiv.org/abs/2504.19413">arXiv:2504.19413</a>; Letta core-memory blocks — <a href="https://www.letta.com/blog/memory-blocks">letta.com</a>; Zep/Graphiti bi-temporal graph with edge invalidation — <a href="https://arxiv.org/abs/2501.13956">arXiv:2501.13956</a>). Helix-specific: a multi-kind lint, a sandboxed write path, a hot cache for <em>"where were we?"</em> recovery.
+</p>
+
+<h3>Storage layout (workspace-rooted)</h3>
+<pre><code>&lt;workspace&gt;/
+├── helix.toml [workspace]                workspace marker
+├── constitution.md                       (F.1)
+├── .mcp.json                             registers the helix MCP server
+└── atlas/
+    ├── inbox/        unprocessed files (PDF/md/...)
+    ├── raw/          ingested originals (moved from inbox)
+    ├── sources/      type: source         (papers, datasets, code)
+    ├── concepts/     type: concept        (extracted ideas, methods)
+    │   ├── contradictions/                surfaced by Scout
+    │   ├── methods/                       methods that generalize across projects
+    │   └── glossary/                      shared terms (F.4 — Ubiquitous Language)
+    ├── entities/     type: entity         (people, orgs, datasets)
+    │   └── datasets/                      data thread anchors (E)
+    └── projects/&lt;id&gt;/
+        ├── spec.md                        the spec (F.2)
+        ├── plan.md
+        ├── tasks.md                       (F.2)
+        ├── results/summary.md
+        ├── overview.md                    Results Critic's overview
+        ├── _hot.md                        hot cache resource
+        ├── reports/&lt;stage&gt;.html         per-stage HTML report (D · single-file round-trip)
+        ├── threads/&lt;thread&gt;.md          longitudinal artifacts (E · incl. hypothesis · H)
+        ├── artifacts/                     code artifacts (sandboxed)
+        └── .decisions.json                stage-by-stage decision log
+
+&lt;project&gt;/                                   per-project run root (helix new)
+├── helix.toml                            points at the workspace marker
+├── question.md
+├── &lt;source files…&gt;
+└── .helix/
+    ├── snapshots/                        the snapshot DAG
+    ├── runs/                             bounded run registry
+    └── pending/                          suspended steps
+</code></pre>
+
+<h3>Page model</h3>
+<p>Every page is markdown with typed YAML frontmatter:</p>
+<pre><code>---
+id:         atlas:&lt;type&gt;:&lt;slug&gt;
+type:       source | concept | entity | report | thread | spec | plan
+tier:       working | active | canonical | published
+title:      "..."
+summary:    "one-line"
+aliases:    ["..."]
+links:      ["atlas:concepts:slug", "atlas:sources:slug"]
+provenance: { stage, run_id, snapshot_id, sources: [...], confidence }
+ts:         { created_at, updated_at }
+---</code></pre>
+<p>
+  Frontmatter is queryable (Obsidian Bases pattern). Bodies are atomic — <em>one concept per page</em> (Matuschak). Wikilinks (<code>[[...]]</code>) create backlinks automatically (Obsidian / Roam); the graph view falls out of the link store. Code artifacts are content-addressed under <code>&lt;project&gt;/.helix/snapshots/objects/&lt;sha&gt;</code>; pages reference by hash so identical files across iterations store once.
+</p>
+
+<h3>Tier model + promotion</h3>
+<table>
+  <thead><tr><th>Tier</th><th>Meaning</th><th>Promotion</th></tr></thead>
+  <tbody>
+    <tr><td><code>working</code></td><td>the default — any stage write lands here</td><td>automatic</td></tr>
+    <tr><td><code>active</code></td><td>reviewed inside this project</td><td>manual or via <code>hx_atlas_reconcile</code></td></tr>
+    <tr><td><code>canonical</code></td><td>reviewed cross-project; the workspace's "what we know"</td><td><code>hx_atlas_promote</code> + elicitation confirm</td></tr>
+    <tr><td><code>published</code></td><td>externally shareable; immutable for citation</td><td><code>hx_atlas_promote</code> + elicit + <code>hx_snap_freeze</code></td></tr>
+  </tbody>
+</table>
+<p>Capture is cheap (everything lands at <code>working</code>); curation is gated (Zettelkasten fleeting → permanent).</p>
+
+<h3>Recall (auto-routing)</h3>
+<div class="mermaid">
+flowchart LR
+  Q[hx_atlas_recall query] --&gt; R{mode}
+  R -- auto / lexical --&gt; L[Lexical · full-text + alias]
+  R -- semantic --&gt; S[Semantic · fastembed ANN]
+  R -- graph --&gt; G[Graph · k-hop on wikilinks]
+  R -- community --&gt; C[Community · label propagation]
+  L --&gt; OUT[References only:<br/>id · title · tier · summary · score]
+  S --&gt; OUT
+  G --&gt; OUT
+  C --&gt; OUT
+  OUT -- hx_atlas_get --&gt; BODY[Page body]
+</div>
+<ul>
+  <li><strong><code>lexical</code></strong> — full-text + alias match; the always-available fallback.</li>
+  <li><strong><code>semantic</code></strong> — <code>fastembed</code> (optional) over body sha256; vector ANN; lazy-imported per the dependency-light invariant.</li>
+  <li><strong><code>graph</code></strong> — k-hop traversal over the wikilink graph from a seed page.</li>
+  <li><strong><code>community</code></strong> — label-propagation communities; returns the seed's community + a synthesis page if one exists.</li>
+</ul>
+<p>Recall returns <strong>references only</strong>; <code>hx_atlas_get</code> fetches a body. The find/fetch split keeps a search from flooding the model's context.</p>
+
+<h3>Ingest</h3>
+<p>
+  <code>hx_atlas_ingest(path)</code> processes <code>atlas/inbox/</code> (or one file). It is <strong>idempotent</strong>: a <code>.manifest.json</code> keyed by sha256 records what has been processed. New files become <code>type: source</code> pages; originals move to <code>atlas/raw/</code>. Markdown/text natively; PDF via the optional <code>pdf</code> extra (<code>pymupdf</code>); other formats land as <code>raw/</code> with a thin stub page.
+</p>
+
+<h3>Write protocol (action vocabulary + dedup gate)</h3>
+<p>Every Atlas write declares one of:</p>
+<table>
+  <thead><tr><th>Action</th><th>When</th></tr></thead>
+  <tbody>
+    <tr><td><code>ADD</code></td><td>a new page; no existing page covers this exact concept</td></tr>
+    <tr><td><code>UPDATE</code></td><td>an existing page is the right home; merge new content</td></tr>
+    <tr><td><code>SUPERSEDE</code></td><td>a prior page is now wrong; mark superseded, link forward</td></tr>
+    <tr><td><code>LINK</code></td><td>no content change; add a relationship edge between existing pages</td></tr>
+    <tr><td><code>NOOP</code></td><td>nothing belongs in the Atlas — it lives only in the snapshot</td></tr>
+  </tbody>
+</table>
+<p>
+  Each write carries a one-line <code>because</code> rationale. Mirrors mem0's ADD/UPDATE/DELETE/NOOP (<a href="https://arxiv.org/abs/2504.19413">arXiv:2504.19413</a>, <a href="https://docs.mem0.ai/core-concepts/memory-operations/update">mem0 docs</a>) and Letta's <code>memory_insert</code> / <code>memory_replace</code> / <code>memory_rethink</code> on core-memory blocks (<a href="https://docs.letta.com/advanced/memory-management/">Letta docs</a>).
+</p>
+
+<div class="mermaid">
+flowchart TB
+  W[Agent wants to write a page] --&gt; P[hx_atlas_propose · auto-routing recall k=3]
+  P --&gt; D{candidates?}
+  D -- no match --&gt; A[ADD · new page]
+  D -- close match · same concept --&gt; U[UPDATE · merge into existing]
+  D -- match but stale / wrong --&gt; SUP[SUPERSEDE · mark old · link forward]
+  D -- match · only need to relate --&gt; LK[LINK · add edge only]
+  D -- nothing belongs in Atlas --&gt; N[NOOP · lives in the snapshot]
+  A --&gt; PROV[Provenance required:<br/>stage · run · snap · sources · confidence]
+  U --&gt; PROV
+  SUP --&gt; PROV
+  LK --&gt; PROV
+</div>
+
+<h4>Per-stage trigger map</h4>
+<table>
+  <thead><tr><th>Stage</th><th>Trigger → Action</th></tr></thead>
+  <tbody>
+    <tr><td>Scout</td><td>new source ingested → <code>ADD sources/&lt;file&gt;.md</code>; named concept new → <code>ADD concepts/&lt;slug&gt;.md</code>, existing → <code>UPDATE</code>; contradiction surfaced → <code>ADD concepts/contradictions/&lt;topic&gt;.md</code>; spec written → <code>ADD projects/&lt;id&gt;/spec.md</code>; dataset identified → <code>ADD entities/datasets/&lt;slug&gt;.md</code></td></tr>
+    <tr><td>Scout Critic</td><td>(no Atlas writes — notes live in the overlay sidecar inside the HTML)</td></tr>
+    <tr><td>Planner</td><td><code>ADD projects/&lt;id&gt;/plan.md</code>; <code>LINK</code> to every concept it references; data plan → <code>UPDATE entities/datasets/&lt;slug&gt;.md</code></td></tr>
+    <tr><td>Builder</td><td>usually <code>NOOP</code> for Atlas (code artifacts live in <code>projects/&lt;id&gt;/artifacts/</code>); <code>ADD projects/&lt;id&gt;/results/summary.md</code> once metrics are in; built/curated dataset → <code>ADD entities/datasets/&lt;slug&gt;/</code></td></tr>
+    <tr><td>Validator</td><td><code>NOOP</code> by default; <code>UPDATE</code> a concept's validation bands only if the run learned something generalizable</td></tr>
+    <tr><td>Results Critic</td><td><code>ADD projects/&lt;id&gt;/overview.md</code>; <code>SUPERSEDE</code> prior drafts on the same path; <code>LINK</code> to spec + concepts</td></tr>
+  </tbody>
+</table>
+<p>
+  <strong>Dedup gate</strong> — <code>hx_atlas_propose(write)</code> runs the existing auto-routing recall against the page's title/summary/aliases, returns the top-3 candidates + a recommended action. Agents call this <em>before</em> an <code>ADD</code>. Mirrors Graphiti's hybrid-search entity-resolution + edge-dedup at write time (<a href="https://arxiv.org/abs/2501.13956">arXiv:2501.13956</a>) — composing the recall we already have rather than building new infrastructure.<br>
+  <strong>Provenance required</strong> — every page carries <code>{stage, run_id, snapshot_id, sources: [...], confidence}</code>. Most is derivable in the sanitizer; missing provenance fails validation.<br>
+  <strong>Capture cheap, curate gated</strong> — writes land at <code>tier: working</code> by default (Zettelkasten — <a href="https://zettelkasten.de/posts/concepts-sohnke-ahrens-explained/">zettelkasten.de</a>). A periodic <code>hx_atlas_reconcile</code> re-runs lint, dedups, proposes promotions.<br>
+  <strong>Spec-driven cross-reference</strong> — every write declares which spec line(s) it supports / contradicts / extends. Pages citing no spec line are flagged by lint as <code>orphan-by-policy</code>.
+</p>
+
+<h3>Threads (E — recap)</h3>
+<p>
+  Threads are longitudinal artifacts (<code>question/hypothesis</code> · <code>data</code> · <code>spec</code> · <code>plan</code> · <code>design</code> · <code>code-org</code> · <code>glossary</code>). Each is an Atlas page at <code>projects/&lt;id&gt;/threads/&lt;thread&gt;.md</code> with a status machine and per-snapshot update sections. Resource <code>thread://&lt;project&gt;/&lt;name&gt;</code> reads the current state; <code>?at=&lt;snap&gt;</code> reads it at a snapshot — Graphiti's bi-temporal read.
+</p>
+
+<h3>Lint (the full check list)</h3>
+<table>
+  <thead><tr><th>Check</th><th>Catches</th></tr></thead>
+  <tbody>
+    <tr><td><code>orphan</code></td><td>a page no other page links to</td></tr>
+    <tr><td><code>contradiction</code></td><td>two <code>working</code>/<code>active</code> pages asserting opposites on the same concept</td></tr>
+    <tr><td><code>stale</code></td><td>source changed (sha mismatch) or body change with no updated_at bump</td></tr>
+    <tr><td><code>missing-page</code></td><td>a wikilink target that doesn't exist</td></tr>
+    <tr><td><code>unaliased</code></td><td>a duplicate concept reachable via two distinct page ids</td></tr>
+    <tr><td><code>orphan-community</code></td><td>a community with no synthesis page</td></tr>
+    <tr><td><code>orphan-thread</code> (E)</td><td>a thread expected at this stage but missing</td></tr>
+    <tr><td><code>vocabulary-drift</code> (F.4)</td><td>a term in spec/plan/code not in the glossary</td></tr>
+    <tr><td><code>stale-report</code> (D)</td><td>a report file mismatching the canonical name or for a stage that didn't run</td></tr>
+    <tr><td><code>orphan-by-policy</code> (G — write protocol)</td><td>a page citing no spec line</td></tr>
+    <tr><td><code>dataset-without-license</code> (E)</td><td>a <code>entities/datasets/*</code> page missing a license</td></tr>
+    <tr><td><code>dataset-without-source</code> (E)</td><td>missing a source</td></tr>
+    <tr><td><code>discovery-log</code> (H)</td><td>a hypothesis marked <code>supported</code> with no validator pass</td></tr>
+  </tbody>
+</table>
+
+<h3>Hot cache</h3>
+<p>
+  <code>hot://&lt;project&gt;</code> (under <code>atlas/projects/&lt;id&gt;/_hot.md</code>) is the <em>"where were we?"</em> page, regenerated at the end of every run from the current state + recent decisions + open questions + active threads. It is the single page a resuming session reads first.
+</p>
+
+<h3>MCP tool surface (Atlas)</h3>
+<table>
+  <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>hx_atlas_ingest</code></td><td>Process <code>atlas/inbox/</code> idempotently.</td></tr>
+    <tr><td><code>hx_atlas_recall</code></td><td>Auto-routing search; references only.</td></tr>
+    <tr><td><code>hx_atlas_get</code></td><td>Fetch one page body (capped).</td></tr>
+    <tr><td><code>hx_atlas_neighbors</code></td><td>k-hop neighbours over the link graph.</td></tr>
+    <tr><td><code>hx_atlas_lint</code></td><td>The full report; one-click fix per issue.</td></tr>
+    <tr><td><code>hx_atlas_put</code></td><td>Create/update a page (merges on path).</td></tr>
+    <tr><td><code>hx_atlas_save</code></td><td>File an LLM synthesis as a page.</td></tr>
+    <tr><td><code>hx_atlas_promote</code></td><td>Bump tier; elicits at canonical/published.</td></tr>
+    <tr><td><code>hx_atlas_propose</code> <span class="badge b-new">new</span></td><td>Dedup gate before <code>ADD</code>.</td></tr>
+    <tr><td><code>hx_atlas_reconcile</code> <span class="badge b-new">new</span></td><td>Periodic dedup + promotion proposals.</td></tr>
+    <tr><td><code>atlas_status</code></td><td>Page count + known projects.</td></tr>
+  </tbody>
+</table>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>G-1</strong> Workspace marker file (resolves with A1).
+  <strong>G-2</strong> Is <code>hx_atlas_propose</code> required before every <code>ADD</code> (recommended) or recommended-by-prompt only.
+  <strong>G-3</strong> What exactly to vendor vs. reference for skills (resolves with I-1 below).
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="H">Workstream H — Discovery engine: propose · validate · revise <span class="badge b-new">renamed from L</span></h2>
+<p>
+  Helix's pipeline IS the discovery engine. The autonomous hypothesis loop — <strong>propose → validate → revise</strong> — runs <strong>end-to-end across the existing six stages</strong>, not as a new stage. A new <code>hypothesis</code> thread (E) holds the candidates and their status.
+</p>
+<div class="mermaid">
+flowchart TB
+  Q[Question / hypothesis thread] --&gt; SC[Scout · propose hypotheses + gaps]
+  SC --&gt; SCC[Scout Critic · rank · idea tournament]
+  SCC --&gt; PL[Planner · design validation plan]
+  PL --&gt; BU[Builder · execute under TDD]
+  BU --&gt; VA[Validator · programmatic checks]
+  VA --&gt; RC[Results Critic · automated reviewer · verdict]
+  RC -- supported · refuted · inconclusive --&gt; Q
+  classDef new fill:#ddf4ff,stroke:#0550ae,color:#0550ae;
+  class Q,RC new
+</div>
+
+<h3>H.1 — A first-class hypothesis thread</h3>
+<p>
+  Each entry carries <code>{id, statement, type, support, refutations, status, last_touched_at, provenance}</code>, where <code>status ∈ {proposed, validating, supported, refuted, revised, retired}</code>.
+</p>
+
+<h3>H.2 — Per-stage roles</h3>
+<table>
+  <thead><tr><th>Stage</th><th>Discovery-engine role</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Scout</strong> (B)</td><td><strong>Propose</strong> candidate hypotheses from the literature dive + the question; surface gaps and contradictions that imply hypotheses worth testing.</td></tr>
+    <tr><td><strong>Scout Critic</strong></td><td>Score candidates: testable · falsifiable · distinct. <strong>Idea-tournament / ranking</strong> structure from Google's AI co-scientist (<a href="https://deepmind.google/blog/co-scientist-a-multi-agent-ai-partner-to-accelerate-research/">blog</a>, <a href="https://arxiv.org/abs/2502.18864">arXiv:2502.18864</a>) — Elo-style ranking over the candidates.</td></tr>
+    <tr><td><strong>Planner</strong></td><td>Design the validation plan for the top-ranked hypothesis: data, methods, validation bands.</td></tr>
+    <tr><td><strong>Builder</strong></td><td>Execute under TDD (F.5). <strong>Agentic tree search / experiment manager</strong> from Sakana <strong>AI Scientist-v2</strong> (<a href="https://arxiv.org/abs/2504.08066">arXiv:2504.08066</a>, <a href="https://github.com/SakanaAI/AI-Scientist-v2">SakanaAI/AI-Scientist-v2</a>).</td></tr>
+    <tr><td><strong>Validator</strong></td><td>Programmatic checks against the validation bands. <strong>FunSearch</strong>'s <em>programmatic validator</em> discipline — execute the program, don't just judge the text (<a href="https://deepmind.google/discover/blog/funsearch-making-new-discoveries-in-mathematical-sciences-using-large-language-models/">DeepMind blog</a>, <a href="https://www.nature.com/articles/s41586-023-06924-6">Nature 2023</a>).</td></tr>
+    <tr><td><strong>Results Critic</strong></td><td><strong>Automated reviewer</strong>: per hypothesis returns <code>supported</code> / <code>refuted</code> / <code>inconclusive</code>, plus a revised hypothesis for the next loop. Verdict pattern from Sakana.</td></tr>
+  </tbody>
+</table>
+
+<h3>H.3 — Closed vs. open loop</h3>
+<p>
+  By default the loop is <strong>open</strong>: Results Critic returns its verdict and the run pauses for the researcher to decide whether to revise (send-back). A <code>Plan</code> mode <code>autonomy_until: rediscover</code> runs the loop <strong>closed</strong> for N iterations against the same spec — Coscientist's autonomous wet-lab framing (<a href="https://www.nature.com/articles/s41586-023-06792-0">Boiko et al., <em>Nature</em> 2023</a>).
+</p>
+
+<h3>H.4 — Safety + reproducibility</h3>
+<ul>
+  <li>The hypothesis thread cites Atlas pages and dataset versions for every <code>support</code>/<code>refutation</code> (provenance per G).</li>
+  <li>Validator failures pause the loop; the loop never auto-promotes a hypothesis past <code>supported</code> without an explicit human elicit (mirroring <code>hx_atlas_promote</code>'s gate).</li>
+  <li>A <code>discovery-log</code> lint check flags hypotheses that gained <code>supported</code> status without a validator pass.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>
+  <strong>H-1</strong> Hypothesis-thread schema (severity bands; "distinct" metric for the idea tournament).
+  <strong>H-2</strong> Default iteration cap for the closed loop (recommendation: 3; capped further by the existing token/call budget).
+  <strong>H-3</strong> Ranking sub-agent vs. function of the Scout Critic (recommendation: function of Scout Critic — only one critic).
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="I">Workstream I — Skills &amp; plugins (license-aware) <span class="badge b-new">renamed from F</span></h2>
+<p>Because the model <em>is</em> Claude Code, the agent already has its installed skills/plugins. Integration is instruction-first; vendoring only where licenses allow — no new Python dependency, core stays dependency-light.</p>
+<table>
+  <thead><tr><th>Source</th><th>License</th><th>Treatment</th></tr></thead>
+  <tbody>
+    <tr><td><strong><code>obra/superpowers</code></strong> — <a href="https://github.com/obra/superpowers/blob/main/LICENSE">LICENSE</a></td><td>MIT</td><td><strong>Vendorable with attribution.</strong> Include the MIT notice + the upstream <code>LICENSE</code> + a <code>NOTICE</code> crediting Jesse Vincent. Verify per-skill before bundling individual skills.</td></tr>
+    <tr><td><strong><code>anthropics/skills</code></strong> — <a href="https://github.com/anthropics/skills">README</a></td><td>mixed</td><td><strong>Apache-2.0 skills only</strong> redistributable (carry Apache-2.0 NOTICE + per-skill <code>LICENSE</code> if present). <code>xlsx</code>/<code>docx</code>/<code>pdf</code>/<code>pptx</code> are <em>source-available, not open source</em> — <strong>do not redistribute</strong>.</td></tr>
+    <tr><td><strong>Claude-Code-bundled <code>anthropic-skills:*</code></strong> + standalone <code>simplify</code> / <code>review</code> / <code>security-review</code> / <code>loop</code> / <code>schedule</code> / <code>init</code></td><td>unverified / proprietary</td><td><strong>Reference, do not redistribute.</strong> Call by name in stage prompts; <code>helix init</code> documents how to install them in Claude Code; degrade gracefully if absent.</td></tr>
+  </tbody>
+</table>
+<p>Per-stage instruction map (treat as "use when available", not mandatory):</p>
+<table>
+  <thead><tr><th>Stage</th><th>Skills referenced</th></tr></thead>
+  <tbody>
+    <tr><td>Scout</td><td>WebSearch / WebFetch (built-in to Claude Code); literature-review procedure (a recommended <code>superpowers</code> skill if installed)</td></tr>
+    <tr><td>Planner</td><td><code>superpowers</code> planning helpers (optional)</td></tr>
+    <tr><td>Builder</td><td>After writing code artifacts, run <code>simplify</code> and a code-review skill on them before submitting</td></tr>
+    <tr><td>Results Critic</td><td><code>security-review</code> when artifacts contain code</td></tr>
+  </tbody>
+</table>
+<h3>Direct licensing answer</h3>
+<p>
+  You <strong>can</strong> package and credit <code>obra/superpowers</code> (MIT). You <strong>cannot</strong> broadly package the Anthropic side: only the explicitly Apache-2.0 subset of <code>anthropics/skills</code> is redistributable, the document skills are not, and the Claude-Code-bundled <code>anthropic-skills:*</code> set has no public OSS license attached — those should be <strong>referenced and instructed</strong>, never vendored.
+</p>
+<h4>Open decision</h4>
+<p>
+  <strong>I-1</strong> Which exact subset to vendor (default: just <code>obra/superpowers</code> + any per-skill Apache-2.0 skills actually used). The rest is documented as recommended installs.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="cross">Cross-cutting</h2>
+<ul>
+  <li><strong>Invariants preserved.</strong> Dependency-light core; one router (<code>transitions.next_stage</code>); a snapshot never calls a model; sandbox-first; agent-driven, no credentials.</li>
+  <li><strong>Testing.</strong> Web/skills/plugins are the agent's responsibility, so model-free tests stay model-free — the in-process harness fakes stage responses; new sub-phases / threads / overlay code get fake responses in <code>conftest.py</code>; new tools (<code>hx_ask</code> · <code>hx_question_check</code> · <code>hx_atlas_propose</code> · <code>hx_atlas_reconcile</code> · <code>hx_report_send_back</code> · <code>hx_constitution_init</code> · <code>helix new</code>) are exercised through the in-memory MCP client.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="phasing">Phasing</h2>
+<table>
+  <thead><tr><th>Order</th><th>Work</th><th>Why here</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><strong>A</strong> — Workspace &amp; init</td><td>Correctness fix for a shipped regression; small, isolated; introduces the two-command split.</td></tr>
+    <tr><td>2</td><td><strong>F.1</strong> — Constitution</td><td>Tiny artifact; lands with <code>helix init</code>; unblocks every later prompt.</td></tr>
+    <tr><td>3</td><td><strong>D</strong> — HTML reports + overlay + send-back</td><td>High value; unblocks E (reports declare threads) and the one critic.</td></tr>
+    <tr><td>4</td><td><strong>G</strong> — Atlas write protocol + propose dedup gate</td><td>Foundational for every later writer; ships independently.</td></tr>
+    <tr><td>5</td><td><strong>E</strong> — Threads (incl. data + glossary)</td><td>Needs G's actions; cheap as Atlas pages once G lands.</td></tr>
+    <tr><td>6</td><td><strong>F.2 / F.3</strong> + <strong>B</strong> — Spec + Scout (Frame gate · Clarify loop)</td><td>Spec format and the six-command mapping land with Scout's spec output.</td></tr>
+    <tr><td>7</td><td><strong>C</strong> — <code>hx_ask</code></td><td>Builds on B for standardized questions.</td></tr>
+    <tr><td>8</td><td><strong>Scout Critic</strong> + <strong>F.6</strong> — Critic + Deep-Modules rubric</td><td>Lands once everything upstream is stable.</td></tr>
+    <tr><td>9</td><td><strong>F.5</strong> — TDD task loop (Builder + tasks sub-phase)</td><td>Builds on E/F; introduces per-task snapshots.</td></tr>
+    <tr><td>10</td><td><strong>H</strong> — Discovery-engine loop</td><td>Lands on B/F/E once threads + spec are real.</td></tr>
+    <tr><td>11</td><td><strong>I</strong> — Skills/plugins</td><td>Mostly prompt-level; lands incrementally per stage.</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================================================================== -->
+<h2 id="decisions">Open decisions (consolidated)</h2>
+<table>
+  <thead><tr><th>#</th><th>Decision</th><th>Recommendation</th></tr></thead>
+  <tbody>
+    <tr><td>A1</td><td>Workspace marker file</td><td><code>helix.toml [workspace]</code> (one file already exists per project)</td></tr>
+    <tr><td>A2</td><td>Snapshots per-project vs. shared</td><td>Per-project (self-rooting safety holds)</td></tr>
+    <tr><td>A3</td><td>Per-project command name</td><td><code>helix new &lt;project&gt;</code> (npm/cargo-style)</td></tr>
+    <tr><td>A6</td><td>Migration for per-project atlases</td><td>Document only; no auto-migration</td></tr>
+    <tr><td>B1</td><td>Standard interview questions per sub-phase</td><td>Tight 6-question minimum, extensible</td></tr>
+    <tr><td>B2</td><td>Skip-to-full Scout confirmation</td><td>Single <code>hx_ask</code> with explicit "yes, skip" wording</td></tr>
+    <tr><td>C4</td><td>Interactive clarification: chat vs. <code>hx_ask</code></td><td>Both; <code>hx_ask</code> for anything recorded</td></tr>
+    <tr><td>D-1</td><td>Reports: canonical vs. per-attempt</td><td>Canonical only; history via snapshots</td></tr>
+    <tr><td>D-2</td><td>Render path: server HTML vs. JSON+SPA</td><td>Server-side HTML + small inline overlay JS</td></tr>
+    <tr><td>D-3</td><td>Annotations: embedded vs. sidecar</td><td>Embedded JSON in the HTML (single-file round-trip)</td></tr>
+    <tr><td>D-4</td><td>Round-trip: File System Access API vs. always-download</td><td>File System Access API with Download fallback</td></tr>
+    <tr><td>D-5</td><td>Gate-prompt link form</td><td><code>file://</code> URL (clickable in most modern terminals)</td></tr>
+    <tr><td>E1</td><td>Thread schema</td><td>Atlas page per thread + status machine + per-snapshot updates</td></tr>
+    <tr><td>F-1</td><td>Constitution location</td><td>Workspace; per-project override allowed</td></tr>
+    <tr><td>F-2</td><td><code>/clarify</code> hard gate vs. advisory</td><td>Hard: no advance with <code>[NEEDS CLARIFICATION]</code> open</td></tr>
+    <tr><td>F-3</td><td><code>tasks.md</code> generated by Planner sub-phase vs. own stage</td><td>Planner sub-phase (keep six stages)</td></tr>
+    <tr><td>F-4</td><td>Glossary scope</td><td>Workspace + per-project</td></tr>
+    <tr><td>F-5</td><td>TDD strictness</td><td>Hard by default; Constitution opt-out for non-code projects</td></tr>
+    <tr><td>F-6</td><td>Spec gate: enforced vs. advisory</td><td>Advisory + readable; reports declare advancement</td></tr>
+    <tr><td>G-2</td><td><code>hx_atlas_propose</code> required for <code>ADD</code>?</td><td>Required for <code>ADD</code>; optional for targeted actions</td></tr>
+    <tr><td>H-1</td><td>Hypothesis-thread schema</td><td>Inherit E schema + <code>{type, support, refutations}</code></td></tr>
+    <tr><td>H-2</td><td>Closed-loop iteration cap</td><td>3; further capped by token/call budget</td></tr>
+    <tr><td>H-3</td><td>Ranking sub-agent vs. function of Scout Critic</td><td>Function of Scout Critic (one critic)</td></tr>
+    <tr><td>I-1</td><td>Plugin vendoring subset</td><td>Just <code>obra/superpowers</code> (MIT) + per-skill Apache-2.0 used</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================================================================== -->
+<h2 id="risks">Risks</h2>
+<ul>
+  <li><strong>A regresses self-rooting</strong> if done carelessly. Keep operational state per-run; only the Atlas moves to the workspace.</li>
+  <li><strong>Single critic is too thin</strong> if the spec misses something the Builder needs. Mitigated by F.3's Clarify loop + the Validator's deterministic checks + Results Critic's verdict.</li>
+  <li><strong>Single-file HTML round-trip</strong> depends on the File System Access API in Chromium browsers. Non-Chromium fallback is download-and-replace; document it; consider a tiny local helper if it becomes a friction point.</li>
+  <li><strong>Web nondeterminism</strong> in Scout's lit dive. Outputs must still be snapshot- and spec-anchored.</li>
+  <li><strong>License variance.</strong> Re-verify per-skill before redistribution; never bundle anything beyond the explicitly-licensed subset.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="refs">References (selected)</h2>
+<details><summary>Discovery engines (H)</summary>
+<ul>
+  <li><a href="https://arxiv.org/abs/2504.08066">Sakana — The AI Scientist-v2</a> · <a href="https://github.com/SakanaAI/AI-Scientist-v2">repo</a> · <a href="https://github.com/SakanaAI/AI-Scientist">v1</a></li>
+  <li><a href="https://deepmind.google/discover/blog/funsearch-making-new-discoveries-in-mathematical-sciences-using-large-language-models/">DeepMind — FunSearch</a> · <a href="https://www.nature.com/articles/s41586-023-06924-6">Nature 2023</a></li>
+  <li><a href="https://www.nature.com/articles/s41586-023-06792-0">Boiko et al. — Coscientist, Nature 2023</a></li>
+  <li><a href="https://deepmind.google/blog/co-scientist-a-multi-agent-ai-partner-to-accelerate-research/">Google DeepMind — Co-Scientist</a> · <a href="https://arxiv.org/abs/2502.18864">arXiv 2502.18864</a></li>
+  <li><a href="https://www.futurehouse.org/research-announcements/aviary">FutureHouse — Aviary</a></li>
+</ul>
+</details>
+<details><summary>HTML reports + annotations (D)</summary>
+<ul>
+  <li><a href="https://quarto.org/docs/output-formats/html-publishing.html">Quarto — HTML publishing</a> · <a href="https://quarto.org/docs/output-formats/html-basics.html">HTML basics</a></li>
+  <li><a href="https://distill.pub/guide/">Distill — interactive scientific articles</a></li>
+  <li><a href="https://pandoc.org/MANUAL.html">Pandoc — <code>--embed-resources</code></a></li>
+  <li><a href="https://www.w3.org/TR/annotation-model/">W3C — Web Annotation Data Model</a></li>
+  <li><a href="https://web.hypothes.is/blog/fuzzy-anchoring/">Hypothes.is — fuzzy anchoring</a></li>
+  <li><a href="https://support.google.com/docs/answer/6033474">Google Docs — Suggesting mode</a></li>
+  <li><a href="https://fletcher.github.io/MultiMarkdown-6/syntax/critic.html">CriticMarkup</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/showSaveFilePicker">MDN — <code>showSaveFilePicker</code> (File System Access API)</a></li>
+</ul>
+</details>
+<details><summary>Scout · interview-the-researcher (B)</summary>
+<ul>
+  <li><a href="https://scientific-publishing.webshop.elsevier.com/research-process/finer-research-framework/">Elsevier — FINER</a></li>
+  <li><a href="https://libguides.tcu.edu/clinicalquestionhowto/pico">TCU LibGuides — PICOT</a></li>
+  <li><a href="https://en.wikipedia.org/wiki/GQM">Wikipedia — GQM</a></li>
+  <li><a href="https://github.com/stanford-oval/storm">Stanford STORM</a> · <a href="https://arxiv.org/abs/2402.14207">arXiv 2402.14207</a></li>
+  <li><a href="https://arxiv.org/abs/2604.05203">Decision-Oriented Programming with Aporia (arXiv 2604.05203)</a></li>
+  <li><a href="https://elicit.com/blog/systematic-review/">Elicit — systematic review</a></li>
+  <li><a href="https://maxicontieri.substack.com/p/ai-coding-tip-008-use-spec-driven">Contieri — interview the developer</a></li>
+</ul>
+</details>
+<details><summary>Atlas patterns (G)</summary>
+<ul>
+  <li><a href="https://help.obsidian.md/properties">Obsidian — Properties</a> · <a href="https://help.obsidian.md/bases">Bases</a></li>
+  <li><a href="https://notes.andymatuschak.org/Evergreen_notes_should_be_atomic">Matuschak — Evergreen notes should be atomic</a></li>
+  <li><a href="https://www.letta.com/blog/memory-blocks">Letta — Core-memory blocks</a></li>
+  <li><a href="https://arxiv.org/abs/2504.19413">mem0 — Memory operations</a></li>
+  <li><a href="https://arxiv.org/abs/2501.13956">Graphiti — Bi-temporal knowledge graph</a> · <a href="https://github.com/getzep/graphiti">repo</a></li>
+  <li><a href="https://zettelkasten.de/posts/concepts-sohnke-ahrens-explained/">Zettelkasten — Ahrens concepts</a></li>
+</ul>
+</details>
+<details><summary>Agentic engineering (F)</summary>
+<ul>
+  <li><a href="https://github.com/github/spec-kit">GitHub Spec Kit</a> · <a href="https://github.com/github/spec-kit/blob/main/spec-driven.md">spec-driven.md</a></li>
+  <li><a href="https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html">Fowler — Understanding SDD</a></li>
+  <li><a href="https://addyo.substack.com/p/how-to-write-a-good-spec-for-ai-agents">Osmani — How to write a good spec for AI agents</a></li>
+  <li><a href="https://aider.chat/2024/09/26/architect.html">Aider — architect / editor split</a></li>
+  <li><a href="https://martinfowler.com/bliki/UbiquitousLanguage.html">Fowler — Ubiquitous Language</a> · <a href="https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf">Evans — DDD Reference</a></li>
+  <li><a href="https://tidyfirst.substack.com/p/augmented-coding-beyond-the-vibes">Kent Beck — Augmented Coding</a> · <a href="https://newsletter.pragmaticengineer.com/p/tdd-ai-agents-and-coding-with-kent">Pragmatic Engineer interview</a></li>
+  <li><a href="https://engineeringharmony.com/how-test-driven-development-accelerates-ai-coding/">Engineering Harmony — How TDD accelerates AI coding</a></li>
+  <li><a href="https://web.stanford.edu/~ouster/cgi-bin/aposd.php">Ousterhout — A Philosophy of Software Design</a></li>
+  <li><a href="https://agents.md/">AGENTS.md</a> · <a href="https://github.blog/ai-and-ml/github-copilot/how-to-write-a-great-agents-md-lessons-from-over-2500-repositories/">GitHub blog</a></li>
+  <li><a href="https://github.com/plandex-ai/plandex">Plandex</a></li>
+</ul>
+</details>
+<details><summary>Per-stage critics (D · context)</summary>
+<ul>
+  <li><a href="https://arxiv.org/abs/2303.17651">Self-Refine</a> · <a href="https://selfrefine.info/">selfrefine.info</a></li>
+  <li><a href="https://arxiv.org/abs/2303.11366">Reflexion</a></li>
+  <li><a href="https://arxiv.org/abs/2212.08073">Constitutional AI</a></li>
+  <li><a href="https://sre.google/sre-book/postmortem-culture/">Google SRE — Postmortem culture</a></li>
+</ul>
+</details>
+
+<hr>
+<p class="small">
+  Spec 0001 v6 · Draft · self-contained HTML. Diagrams rendered with Mermaid (CDN) at view time.
+</p>
+
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  (function () {
+    const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'default',
+      securityLevel: 'loose', flowchart: { curve: 'basis' } });
+  })();
+</script>
+</body>
+</html>

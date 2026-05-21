@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spec 0001 — Implementation Plan &amp; Design</title>
+<style>
+  :root {
+    --bg:#fff; --fg:#1b1f23; --muted:#57606a; --line:#d0d7de;
+    --accent:#0550ae; --accent-soft:#ddf4ff; --warn:#bf3989;
+    --ok:#1a7f37; --err:#cf222e; --sidebg:#f6f8fa;
+    --code-bg:#f6f8fa;
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d;
+      --accent:#58a6ff; --accent-soft:#0c2d4d; --warn:#db61a2;
+      --ok:#3fb950; --err:#f85149; --sidebg:#161b22; --code-bg:#161b22; }
+  }
+  *{box-sizing:border-box;}
+  html,body{background:var(--bg);color:var(--fg);margin:0;
+    font-family:var(--font-sans);font-size:16px;line-height:1.55;}
+  a{color:var(--accent);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  .wrap{display:grid;grid-template-columns:280px minmax(0,1fr);
+    gap:32px;max-width:1240px;margin:0 auto;padding:24px;}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr;}
+    nav.toc{position:static !important;max-height:none !important;}}
+  nav.toc{position:sticky;top:24px;align-self:start;
+    max-height:calc(100vh - 48px);overflow:auto;font-size:13px;
+    border-right:1px solid var(--line);padding-right:16px;}
+  nav.toc h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;
+    color:var(--muted);letter-spacing:0.04em;}
+  nav.toc ol{list-style:none;padding:0;margin:0 0 16px;}
+  nav.toc li{padding:2px 0;}
+  nav.toc a{color:var(--fg);}
+  main{min-width:0;}
+  h1{font-size:28px;margin:0 0 4px;letter-spacing:-0.01em;}
+  h2{font-size:22px;margin:36px 0 10px;padding-top:14px;
+    border-top:1px solid var(--line);}
+  h3{font-size:17px;margin:22px 0 6px;}
+  h4{font-size:13px;margin:14px 0 4px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:0.04em;}
+  p,ul,ol{margin:8px 0;}
+  ul,ol{padding-left:22px;}
+  code,pre{font-family:var(--font-mono);font-size:13px;}
+  code{background:var(--code-bg);padding:1px 5px;border-radius:4px;}
+  pre{background:var(--code-bg);padding:12px 14px;border-radius:6px;
+    overflow:auto;border:1px solid var(--line);}
+  pre code{background:none;padding:0;}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;}
+  th,td{border:1px solid var(--line);padding:6px 10px;vertical-align:top;text-align:left;}
+  th{background:var(--sidebg);font-weight:600;}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;
+    font-size:11px;font-weight:600;letter-spacing:0.02em;vertical-align:1px;}
+  .b-draft{background:var(--accent-soft);color:var(--accent);}
+  .b-new{background:#dafbe1;color:var(--ok);}
+  .b-mod{background:#fff8c5;color:#573a08;}
+  .b-del{background:#ffebe9;color:var(--err);}
+  .b-s{background:#dafbe1;color:var(--ok);}
+  .b-m{background:#fff8c5;color:#573a08;}
+  .b-l{background:#ffd8b5;color:#8b3a00;}
+  .b-xl{background:#ffebe9;color:var(--err);}
+  @media (prefers-color-scheme: dark){
+    .b-new{background:#033a16;color:#56d364;}
+    .b-mod,.b-m{background:#2a2210;color:#f1e09b;}
+    .b-del,.b-xl{background:#410f15;color:#ff7b72;}
+    .b-l{background:#3a210a;color:#ffba70;}
+  }
+  .mermaid{background:var(--sidebg);border:1px solid var(--line);
+    border-radius:6px;padding:10px;overflow:auto;}
+  blockquote{border-left:3px solid var(--accent);margin:12px 0;
+    padding:4px 14px;color:var(--muted);background:var(--accent-soft);
+    border-radius:0 6px 6px 0;}
+  hr{border:none;border-top:1px solid var(--line);margin:24px 0;}
+  details{margin:8px 0;}
+  summary{cursor:pointer;font-weight:600;}
+  .small{font-size:12px;color:var(--muted);}
+  .note{background:var(--sidebg);border:1px solid var(--line);
+    border-radius:6px;padding:10px 14px;margin:12px 0;font-size:14px;}
+  .ws-meta{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px;font-size:12px;}
+  .ws-meta span{background:var(--sidebg);border:1px solid var(--line);
+    padding:2px 10px;border-radius:999px;}
+  .chk{font-family:var(--font-mono);}
+  @media print{
+    nav.toc{display:none;}
+    .wrap{display:block;padding:0;}
+    body{font-size:11pt;}
+    h2{page-break-before:auto;}
+    .mermaid{break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <h4>Implementation plan · v1</h4>
+  <ol>
+    <li><a href="#approach">Approach</a></li>
+    <li><a href="#now">Codebase today</a></li>
+    <li><a href="#target">Codebase target</a></li>
+    <li><a href="#depmap">Phase dependency map</a></li>
+    <li><a href="#A">A · Workspace &amp; init</a></li>
+    <li><a href="#B">B · Guided Scout</a></li>
+    <li><a href="#C">C · Interactive agents</a></li>
+    <li><a href="#D">D · HTML reports + overlay</a></li>
+    <li><a href="#E">E · Threads (incl. data)</a></li>
+    <li><a href="#F">F · Agentic engineering</a></li>
+    <li><a href="#G">G · Atlas write protocol</a></li>
+    <li><a href="#H">H · Discovery engine</a></li>
+    <li><a href="#I">I · Skills &amp; plugins</a></li>
+    <li><a href="#cross">Cross-cutting</a></li>
+    <li><a href="#milestones">Milestones</a></li>
+    <li><a href="#risks">Risks &amp; mitigations</a></li>
+    <li><a href="#open">Open implementation Qs</a></li>
+  </ol>
+  <p class="small">Spec: <a href="0001-helix-improvements.html">0001-helix-improvements.html</a></p>
+</nav>
+
+<main>
+
+<h1>Spec 0001 — Implementation Plan &amp; Design</h1>
+<p>
+  <span class="badge b-draft">Plan · v1 · Draft</span>
+  <span class="small">A concrete, file-level technical plan for shipping every workstream in
+  <a href="0001-helix-improvements.html">spec 0001 v6</a> into the current codebase.</span>
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="approach">Approach</h2>
+<p>
+  The plan is shaped by three constraints already true of the codebase:
+</p>
+<ul>
+  <li><strong>Dependency-light core</strong> — <code>helix.core</code>,
+    <code>helix.io</code>, and <code>helix.orchestrator.loop</code> import
+    without <code>mcp</code> or <code>fastembed</code>. Anything in this
+    plan that touches the SDK lives in <code>helix/mcp/</code>.</li>
+  <li><strong>One router · one runner</strong> — all routing flows through
+    <code>core.transitions.next_stage</code>; the only runner is
+    <code>loop.advance</code>, re-entered per <code>hx_submit</code>. New
+    workstreams compose; they never duplicate the router or the runner.</li>
+  <li><strong>Snapshots never call a model · sandbox-first</strong> —
+    every new write path passes through <code>sandbox.sanitize_*</code> /
+    <code>validate_project_name</code>; new artifacts are content-addressed
+    where they're bytes.</li>
+</ul>
+<p>
+  The work ships in <strong>eleven phases</strong> (mirroring spec §Phasing).
+  Each phase is independently valuable; full pytest stays green between
+  phases. The autonomous <code>app.run</code> harness (driven by the patched
+  <code>call_llm_json</code> in <code>conftest.py</code>) is the carrier
+  test surface for core changes; the in-memory MCP client
+  (<code>mcp.shared.memory.create_connected_server_and_client_session</code>)
+  is the carrier for end-to-end agent-driven tests.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="now">Codebase today (relevant surface)</h2>
+<div class="mermaid">
+flowchart LR
+  subgraph CLI[helix CLI]
+    INIT[helix init · per-project scaffolding]
+    MCP[helix mcp]
+  end
+  subgraph DRIVE[helix/mcp/ · drive surface]
+    SRV[server.py · 26 @mcp.tool / 3 resource / 5 prompt]
+    CIO[client_io.py · McpClientIO · _elicit only]
+  end
+  subgraph ORCH[helix/orchestrator/]
+    LOOP[loop.py · advance · step_begin · submit_stage · resume_step]
+  end
+  subgraph CORE[helix/core/]
+    AG[agents.py · 5 LLM + 1 deterministic stage agents]
+    ST[stages.py]
+    GA[gates.py]
+    PL[plan.py]
+    TR[transitions.py]
+    SN[snapshots.py]
+    DC[decisions.py · DecisionCard]
+    AT[atlas.py · atlas_index · embed · recall · lint · ingest · hot]
+  end
+  subgraph SHELL[helix/]
+    CFG[config.py · use_root · project_root]
+    IO[io.py · ClientIO · NeedsModel · Declined · ClientUnavailable]
+    LLM[llm.py · call_llm_json · use_responder]
+    RU[runs.py · run registry + pending step]
+    SX[sandbox.py · validate_project_name · sanitize_*]
+    APP[app.py · in-process harness]
+  end
+  INIT --&gt; CFG
+  MCP --&gt; SRV
+  SRV --&gt; CIO
+  SRV --&gt; LOOP
+  LOOP --&gt; AG
+  AG --&gt; LLM
+  LLM --&gt; IO
+  LOOP --&gt; SN
+  LOOP --&gt; GA
+  AG --&gt; AT
+  AT --&gt; SX
+  SRV --&gt; RU
+  CFG --&gt; SX
+</div>
+<p class="small">
+  Current six-stage forge: <code>scout · critic_methods · planner · builder · validator · critic_results</code>.
+  Atlas root resolves under <code>project_root()</code> (regression — spec §A). Reports today: a terse Decision-Card-summary string in the gate prompt; no per-stage HTML, no overlay.
+</p>
+
+<!-- ===================================================================== -->
+<h2 id="target">Codebase target (after the eleven phases)</h2>
+<div class="mermaid">
+flowchart LR
+  subgraph CLI[helix CLI]
+    INITW[helix init · workspace · once]
+    NEW[helix new · per project]
+    MCP[helix mcp]
+    CINIT[helix constitution]
+  end
+  subgraph DRIVE[helix/mcp/]
+    SRV[server.py · ~33 tools incl. hx_ask · hx_question_check · hx_atlas_propose · hx_atlas_reconcile · hx_report_send_back · hx_clarify · helix_new]
+    CIO[client_io.py · McpClientIO unchanged]
+  end
+  subgraph ORCH[helix/orchestrator/]
+    LOOP[loop.py · advance unchanged · sub-phase support via hx_ask in turn]
+  end
+  subgraph CORE[helix/core/]
+    AG[agents.py · scout sub-phase prompt · scout_critic = critic_methods renamed]
+    DC[decisions.py · render_report → HTML · template registry]
+    REP[reports.py · NEW · self-contained HTML renderer + annotation overlay JS · send-back parser]
+    TH[threads.py · NEW · thread store + status machine]
+    AT[atlas.py · write protocol fields action+because+provenance]
+    REC[recall.py · used by hx_atlas_propose unchanged]
+    LN[lint.py · 6 new check kinds]
+    SP[spec.py · NEW · spec.md schema + Clarify scanner]
+    CON[constitution.py · NEW · workspace-level Constitution]
+    HYP[hypothesis.py · NEW · hypothesis thread schema · idea tournament fn]
+  end
+  subgraph SHELL[helix/]
+    CFG[config.py · workspace_root + use_root · two-root model]
+    IO[io.py · unchanged]
+    LLM[llm.py · unchanged]
+    RU[runs.py · pending-step gains hx_ask trail · annotation-sidecar pointer]
+    APP[app.py · unchanged]
+  end
+  INITW --&gt; CFG
+  NEW --&gt; CFG
+  CINIT --&gt; CON
+  SRV --&gt; LOOP
+  SRV --&gt; REP
+  SRV --&gt; TH
+  SRV --&gt; SP
+  SRV --&gt; CON
+  LOOP --&gt; AG
+  AG --&gt; REP
+  AG --&gt; TH
+  AG --&gt; HYP
+  AG --&gt; SP
+  AT --&gt; LN
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="depmap">Phase dependency map</h2>
+<div class="mermaid">
+flowchart LR
+  A[1 · A · Workspace &amp; init] --&gt; F1[2 · F.1 · Constitution]
+  A --&gt; D[3 · D · HTML reports + overlay]
+  A --&gt; G[4 · G · Atlas write protocol]
+  G --&gt; E[5 · E · Threads incl. data + glossary]
+  F1 --&gt; F23B[6 · F.2/F.3 + B · Spec + Scout interview]
+  E --&gt; F23B
+  D --&gt; F23B
+  F23B --&gt; C[7 · C · hx_ask polish]
+  F23B --&gt; SCRIT[8 · Scout Critic rubric + F.6 Deep Modules]
+  D --&gt; SCRIT
+  F23B --&gt; F5[9 · F.5 · TDD task loop]
+  E --&gt; H[10 · H · Discovery engine]
+  F23B --&gt; H
+  SCRIT --&gt; H
+  H --&gt; I[11 · I · Skills/plugins polish]
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="A">Workstream A — Workspace &amp; init <span class="badge b-l">L</span></h2>
+<div class="ws-meta">
+  <span>Spec §A · §G storage</span>
+  <span>Phase 1</span>
+  <span>Risk: must NOT regress self-rooting (commits <code>514f70c</code>, <code>2cb14df</code>)</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Split today's single-folder <code>helix init &lt;name&gt;</code> into a
+  <strong>workspace-level</strong> <code>helix init</code> (run once after
+  clone; creates the shared Atlas + Constitution) plus a <strong>per-project</strong>
+  <code>helix new &lt;project&gt;</code> (creates the run root that
+  <code>use_root</code> already binds during a run). <code>config</code>
+  gains <code>workspace_root()</code> distinct from <code>project_root()</code>;
+  <code>atlas_path()</code> resolves against the workspace; snapshots / runs
+  / pending stay per-project (unchanged).
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/config.py</code></td><td><span class="badge b-mod">mod</span> add <code>workspace_root()</code>; refactor <code>atlas_path()</code> to use it; introduce a workspace marker discovery walk-up</td><td>Resolution order: <code>HELIX_ATLAS</code> · absolute <code>[atlas].path</code> · nearest ancestor with <code>helix.toml [workspace]</code> or <code>.helix-workspace</code> · <code>HELIX_HOME</code> · run root (compat).</td></tr>
+    <tr><td><code>src/helix/cli.py</code></td><td><span class="badge b-mod">mod</span> rework <code>helix init</code> (no args → workspace); add <code>helix new &lt;project&gt;</code></td><td>Workspace scaffold: <code>helix.toml [workspace]</code> + <code>atlas/</code> tree + <code>.mcp.json</code> + (later) <code>constitution.md</code> via F.1. Project scaffold: <code>question.md</code> · per-project <code>helix.toml</code> pointing at the workspace marker · empty <code>.helix/</code>.</td></tr>
+    <tr><td><code>src/helix/cli.py</code></td><td><span class="badge b-new">new</span> <code>_scaffold_workspace()</code> · <code>_scaffold_project(name)</code> helpers</td><td>Pure-function scaffolders so a unit test exercises them without the click harness.</td></tr>
+    <tr><td><code>src/helix/atlas_init.py</code></td><td><span class="badge b-new">new</span> <code>ensure_atlas_tree(root)</code></td><td>Idempotent tree builder (sources/concepts/entities/projects/inbox/raw/glossary/contradictions/methods/datasets). Reused by <code>helix init</code> and by lint's fix path.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-mod">mod</span> drop assumption that <code>project_root() == workspace_root()</code> in <code>hx_atlas_*</code></td><td>All atlas tools already go through <code>config.atlas_path()</code>; only validate.</td></tr>
+    <tr><td><code>tests/conftest.py</code></td><td><span class="badge b-mod">mod</span> the <code>project</code> fixture builds a workspace + a project</td><td>Today it makes HELIX_HOME == folder. New: HELIX_HOME = workspace; project subdir is the run root.</td></tr>
+  </tbody>
+</table>
+
+<h4>New MCP tools</h4>
+<p>None — pure CLI/config work.</p>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_cli.py</code>: <code>helix init</code> scaffolds the workspace; <code>helix new &lt;name&gt;</code> scaffolds the project. Re-running <code>helix init</code> is idempotent.</li>
+  <li><code>test_mcp.py</code>: workspace-discovery resolution covers HELIX_ATLAS · absolute <code>[atlas].path</code> · ancestor marker · HELIX_HOME · run-root fallback. New regression: a run started under <code>use_root(project)</code> writes snapshots/runs/pending under <code>project</code> AND writes atlas pages under <code>workspace</code>.</li>
+  <li>Migration check: a pre-A per-project atlas continues to work (run-root fallback) with a one-line warning suggesting <code>helix new</code> + manual atlas copy.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>A1 (marker), A2 (snapshots per-project — keep), A3 (command name).</p>
+
+<!-- ===================================================================== -->
+<h2 id="B">Workstream B — Guided Scout: interview the researcher <span class="badge b-xl">XL</span></h2>
+<div class="ws-meta">
+  <span>Spec §B</span>
+  <span>Phase 6 (with F.2/F.3)</span>
+  <span>Depends on: D · E · F.2/F.3 · C</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Scout becomes a sequence of standardized sub-phases (Frame · Source · Lit dive · Synthesize · Spec) — implemented at the <strong>prompt level</strong> inside the existing single Scout stage, plus a small completeness-gate tool. The agent uses <code>hx_ask</code> for structured questions; a skip-to-full-Scout option is always offered first.
+</p>
+
+<h4>Design note: where the sub-phases live</h4>
+<blockquote>
+  The single-stage shape is preserved. Scout's <em>turn</em> (one <code>hx_step</code> → many <code>hx_ask</code> elicits in conversation → one <code>hx_submit</code>) walks the sub-phases. The completeness gate is a hard server-side validator; the agent cannot submit a Scout result whose <code>question.md</code> frontmatter is incomplete.
+</blockquote>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/builtin_agents/scout.md</code></td><td><span class="badge b-mod">mod</span> rewrite the system prompt with the REQ-B-* requirements + named question lists per sub-phase + skip-to-full option</td><td>Prompt length budget: ~200 instructions (AGENTS.md guidance). Use concrete YAML example, not abstract rules.</td></tr>
+    <tr><td><code>src/helix/core/spec.py</code></td><td><span class="badge b-new">new</span> <code>load_spec(project)</code> · <code>save_spec(project, content)</code> · YAML frontmatter schema for <code>question.md</code> + <code>spec.md</code></td><td>Pure parsing/validation, no MCP. Schema fields: <code>finer</code> · <code>picot</code> · <code>gqm</code> · <code>datasets</code> · <code>open_questions</code> · <code>gate</code>.</td></tr>
+    <tr><td><code>src/helix/core/spec.py</code></td><td><span class="badge b-new">new</span> <code>question_check(project) -&gt; QuestionCheck</code></td><td>Validates the frontmatter + scans the body for <code>[NEEDS CLARIFICATION:</code> markers. Returns structured findings.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_question_check(folder)</code></td><td>Thin wrapper around <code>spec.question_check</code>; emits actionable list. Refuses Scout advance if findings non-empty.</td></tr>
+    <tr><td><code>src/helix/core/agents.py</code></td><td><span class="badge b-mod">mod</span> Scout's <code>_ctx_scout</code> includes the current <code>question.md</code> + the question-check findings</td><td>So the agent re-reads them on every Scout turn.</td></tr>
+    <tr><td><code>src/helix/orchestrator/loop.py</code></td><td><span class="badge b-mod">mod</span> on Scout submit, run <code>question_check</code> and reject if it fails</td><td>Pure addition before the existing <code>_MAP[scout]</code> call; clean send-back-with-feedback path on failure.</td></tr>
+  </tbody>
+</table>
+
+<h4>Sub-phase flow (concretely, in one Scout turn)</h4>
+<div class="mermaid">
+sequenceDiagram
+  participant U as Researcher
+  participant A as Agent (Claude Code)
+  participant H as Helix MCP
+  A-&gt;&gt;H: hx_step(folder)
+  H-&gt;&gt;A: Scout prompt + sub-phase checklist + skip option
+  A-&gt;&gt;U: hx_ask("skip the interview and run full Scout?")
+  U--&gt;&gt;A: no, walk me through it
+  A-&gt;&gt;U: hx_ask Q1 · what are you investigating?
+  U--&gt;&gt;A: answer
+  A-&gt;&gt;U: hx_ask FINER · PICOT · GQM · data scout questions
+  U--&gt;&gt;A: answers
+  A-&gt;&gt;H: hx_question_check(folder)
+  H--&gt;&gt;A: 2 open [NEEDS CLARIFICATION] markers
+  A-&gt;&gt;U: hx_ask to resolve each
+  U--&gt;&gt;A: answers
+  A-&gt;&gt;H: hx_question_check(folder)
+  H--&gt;&gt;A: gate passes
+  A-&gt;&gt;A: literature dive (WebSearch + WebFetch)
+  A-&gt;&gt;A: synthesize + write atlas pages
+  A-&gt;&gt;H: hx_submit(scout, result_json) · spec written
+</div>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_spec.py</code>: frontmatter parse round-trip; <code>question_check</code> finds missing FINER/PICOT/GQM fields + <code>[NEEDS CLARIFICATION]</code> markers in the body.</li>
+  <li><code>test_mcp.py</code>: <code>hx_question_check</code> returns the actionable findings; orchestrator rejects a Scout submit when the gate fails; happy-path drives an agent-driven Scout to completion (faked answers).</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>B1 (question count), B2 (skip confirmation).</p>
+
+<!-- ===================================================================== -->
+<h2 id="C">Workstream C — Interactive agents (<code>hx_ask</code>) <span class="badge b-s">S</span></h2>
+<div class="ws-meta">
+  <span>Spec §C</span>
+  <span>Phase 7</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Thin tool wrapping the existing <code>io.elicit</code> seam so agents can ask structured questions <em>mid-stage</em> and the Q&amp;A is auditable (recorded in the snapshot / pending). Free chat (plain conversation) coexists.
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/io.py</code></td><td>(no change) · already exports <code>ask_text/choice/multi/confirm</code> + <code>Declined</code></td><td>Reuse the same schema builders.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_ask(prompt, schema_json="", project="")</code></td><td>Runs via <code>_drive</code> (elicitation pre-flight); appends the Q&amp;A to <code>runs.get_pending(project)["clarifications"]</code> if a pending step exists; else writes a structured note to the run registry.</td></tr>
+    <tr><td><code>src/helix/runs.py</code></td><td><span class="badge b-mod">mod</span> pending payload gains <code>clarifications: list[{q,a,at}]</code></td><td>Travels with the snapshot via the run record; the next stage prompt includes the list.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/*.md</code></td><td><span class="badge b-mod">mod</span> every stage prompt explicitly permits <code>hx_ask</code> when load-bearing inputs are ambiguous</td><td>Sentence-level addition; no semantic change to stage outputs.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_mcp.py</code>: <code>hx_ask</code> round-trips through the in-memory elicitation callback; the Q&amp;A appears in the next-stage prompt context; declined elicits surface as <code>Declined</code> (existing resumable pause).</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="D">Workstream D — HTML reports + critic overlay + send-back <span class="badge b-xl">XL</span></h2>
+<div class="ws-meta">
+  <span>Spec §D</span>
+  <span>Phase 3</span>
+  <span>Risk: largest single piece; the single-file round-trip needs care</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Stage reports become self-contained HTML at <code>projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code>, overwritten each (re-)run, with an embedded annotation overlay (W3C Web Annotation Data Model + Hypothes.is fuzzy anchoring + CriticMarkup). Single-file round-trip via the File System Access API with a download-and-replace fallback. <code>hx_report_send_back</code> parses the modified HTML back into structured feedback for the stage re-run.
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/core/decisions.py</code></td><td><span class="badge b-mod">mod</span> <code>render_report(card, stage, spec, threads) -&gt; str</code> emits self-contained HTML</td><td>Delegates to <code>core/reports.py</code>; the existing card schema is unchanged.</td></tr>
+    <tr><td><code>src/helix/core/reports.py</code></td><td><span class="badge b-new">new</span> the HTML renderer + the per-stage Jinja templates + the overlay JS/CSS bundle</td><td>Pure Python; no <code>mcp</code> import. Templates live alongside (next row).</td></tr>
+    <tr><td><code>src/helix/builtin_templates/&lt;stage&gt;.html.j2</code></td><td><span class="badge b-new">new</span> 6 per-stage templates (Scout · Scout Critic · Planner · Builder · Validator · Results Critic)</td><td>Per spec §D table: IMRaD+PRISMA · Blameless PIR · Rust RFC · MADR+PR-checklist · IMRaD-Methods/Results · Blameless PIR+verdict. Projects may override at <code>agents/templates/&lt;stage&gt;.html.j2</code>.</td></tr>
+    <tr><td><code>src/helix/core/reports.py</code></td><td><span class="badge b-new">new</span> <code>parse_round_trip(html_str) -&gt; ReportRoundTrip</code></td><td>Extracts the embedded <code>&lt;script type="application/json" id="hx-annotations"&gt;</code> block; returns <code>{kept, rejected, replies, comments, previous_html}</code>.</td></tr>
+    <tr><td><code>src/helix/core/reports.py</code></td><td><span class="badge b-new">new</span> the overlay JS/CSS bundle as a Python string constant</td><td>~6–10 KB. Self-contained; no external runtime. Uses File System Access API where available; falls back to "download annotated copy" via a Blob.</td></tr>
+    <tr><td><code>src/helix/orchestrator/loop.py</code></td><td><span class="badge b-mod">mod</span> after a stage's snapshot, also write the HTML report</td><td>Goes through the renderer; gated by stage type (validator deterministic still writes a Validator report).</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_report_send_back(folder, project, stage)</code></td><td>Parses the on-disk HTML (modified by the researcher), calls <code>loop.send_back(stage, payload)</code>.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-mod">mod</span> gate prompts include a clickable <code>file://&lt;abs&gt;/reports/&lt;stage&gt;.html</code> link + an annotation-count summary</td><td>Most modern terminals + Claude Code render <code>file://</code> as clickable.</td></tr>
+    <tr><td><code>src/helix/orchestrator/loop.py</code></td><td><span class="badge b-new">new</span> <code>send_back(stage, payload)</code></td><td>Builds the feedback string from <code>kept · rejected_with_reasons · replies · researcher_comments · previous_html</code>; threads it through the existing <code>record_feedback</code> + <code>goto &lt;stage&gt;</code>.</td></tr>
+    <tr><td><code>src/helix/core/lint.py</code></td><td><span class="badge b-mod">mod</span> add <code>stale-report</code> check</td><td>Any <code>reports/*.html</code> not in the canonical set for the latest run.</td></tr>
+  </tbody>
+</table>
+
+<h4>Self-contained HTML round-trip (the tech)</h4>
+<div class="mermaid">
+sequenceDiagram
+  participant L as loop.advance
+  participant R as reports.render
+  participant FS as filesystem
+  participant B as browser
+  participant SB as hx_report_send_back
+  L-&gt;&gt;R: render(card, stage, spec, threads)
+  R-&gt;&gt;R: emit HTML + embedded JSON annotations + overlay JS/CSS
+  R-&gt;&gt;FS: write projects/&lt;id&gt;/reports/&lt;stage&gt;.html
+  L-&gt;&gt;L: gate prompt with file:// link + ann count
+  B-&gt;&gt;FS: open file://...
+  B-&gt;&gt;B: overlay paints critic side-notes
+  B-&gt;&gt;B: researcher Accept/Reject/Reply/Comment/Send-back
+  B-&gt;&gt;FS: showSaveFilePicker writes updated HTML in place
+  SB-&gt;&gt;FS: read projects/&lt;id&gt;/reports/&lt;stage&gt;.html
+  SB-&gt;&gt;SB: parse_round_trip → ReportRoundTrip
+  SB-&gt;&gt;L: send_back(stage, payload) → goto stage with feedback
+</div>
+
+<h4>Annotation JSON shape (embedded in the HTML)</h4>
+<pre><code>{
+  "@context": "http://www.w3.org/ns/anno.jsonld",
+  "annotations": [
+    {
+      "id": "hx-ann-001",
+      "type": "Annotation",
+      "creator": {"type": "Software", "name": "scout_critic"},
+      "created": "2026-05-19T14:33:21Z",
+      "state": "open",            // open · accepted · rejected
+      "severity": "high",          // low · medium · high
+      "body": {
+        "type": "TextualBody",
+        "value": "H3 lacks a falsification condition.",
+        "purpose": "commenting",
+        "patch": null               // or a CriticMarkup string for suggested edits
+      },
+      "target": {
+        "source": "reports/scout.html",
+        "selector": [
+          {"type": "FragmentSelector", "value": "scout-hyps"},
+          {"type": "TextQuoteSelector", "exact": "Active-stand-induced ΔBP …",
+            "prefix": "H3 — ", "suffix": " using HRV-derived features."},
+          {"type": "TextPositionSelector", "start": 1438, "end": 1503}
+        ]
+      },
+      "log": [
+        {"actor": "researcher", "action": "accepted", "at": "2026-05-19T14:36:02Z"}
+      ]
+    }
+  ],
+  "context": {
+    "previous_report_sha": "sha256:...",
+    "spec_path": "projects/orthobp/spec.md",
+    "snapshot_id": "12"
+  }
+}</code></pre>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_reports.py</code>: <code>render_report</code> emits valid HTML containing the embedded JSON block + the overlay script; <code>parse_round_trip</code> round-trips a sample HTML with edits (kept/rejected/comments).</li>
+  <li><code>test_mcp.py</code>: end-to-end — drive Scout, simulate a modified HTML with a rejected annotation + a researcher comment, call <code>hx_report_send_back</code>, assert the next stage re-runs with the feedback in the agent's prompt context.</li>
+  <li><code>test_lint.py</code>: <code>stale-report</code> flags an orphaned HTML for a stage that didn't run on the latest snapshot path.</li>
+  <li>Browser sanity check (manual, not CI): open a rendered HTML in Chrome; verify File System Access API saves a modified copy in place.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>D-1 (canonical only), D-2 (server-side HTML), D-3 (embedded JSON), D-4 (FSA API + fallback), D-5 (<code>file://</code> link).</p>
+
+<!-- ===================================================================== -->
+<h2 id="E">Workstream E — Threads (incl. data) <span class="badge b-m">M</span></h2>
+<div class="ws-meta">
+  <span>Spec §E</span>
+  <span>Phase 5</span>
+  <span>Depends on: G (action vocabulary), A (workspace root)</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Make threads explicit and longitudinal: <code>question/hypothesis · data · spec · plan · design · code-org · glossary</code>, each an Atlas page at <code>projects/&lt;id&gt;/threads/&lt;thread&gt;.md</code> with a status machine and per-snapshot update sections. New MCP resource <code>thread://&lt;project&gt;/&lt;name&gt;</code>. New lint checks. Data scouted/planned/built/validated/critiqued at every stage.
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/core/threads.py</code></td><td><span class="badge b-new">new</span> <code>Thread</code> dataclass · <code>load_thread/save_thread</code> · <code>append_update(thread, snapshot_id, body)</code></td><td>Front matter: <code>{thread, status, opened_at, last_touched_at, contributors}</code>. Status machine: Proposed → Accepted → Superseded.</td></tr>
+    <tr><td><code>src/helix/core/agents.py</code></td><td><span class="badge b-mod">mod</span> each stage's <code>_MAP</code> + <code>_CONTEXT</code> reads/writes the relevant threads (per spec §E table)</td><td>Touches every stage; small per-stage. Updates flow through G's action vocabulary as <code>UPDATE</code> writes.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.resource("thread://{project}/{name}")</code> + <code>?at=&lt;snap&gt;</code> variant</td><td>Returns the rendered thread page body (Graphiti-style bi-temporal read).</td></tr>
+    <tr><td><code>src/helix/core/lint.py</code></td><td><span class="badge b-mod">mod</span> add <code>orphan-thread</code> · <code>dataset-without-license</code> · <code>dataset-without-source</code> checks</td><td>Each with a one-click fix per the existing lint pattern.</td></tr>
+    <tr><td><code>src/helix/atlas_init.py</code></td><td><span class="badge b-mod">mod</span> scaffold <code>entities/datasets/</code> + <code>threads/</code> dirs</td><td>Idempotent.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/*.md</code></td><td><span class="badge b-mod">mod</span> each stage's prompt includes the threads it touches (per spec §E table)</td><td>Scout includes glossary seeding; Planner includes data plan; Builder includes data build + design + code-org; etc.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_threads.py</code>: status-machine transitions; <code>append_update</code> preserves history per snapshot id.</li>
+  <li><code>test_mcp.py</code>: <code>thread://orthobp/hypothesis</code> resource returns the current state; <code>?at=&lt;snap&gt;</code> returns the past state.</li>
+  <li><code>test_lint.py</code>: dataset checks; orphan-thread.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>E1 (thread schema).</p>
+
+<!-- ===================================================================== -->
+<h2 id="F">Workstream F — Agentic engineering (incl. spec-driven) <span class="badge b-l">L</span></h2>
+<div class="ws-meta">
+  <span>Spec §F</span>
+  <span>Phases 2 (F.1) · 6 (F.2/F.3) · 8 (F.6 + Scout Critic) · 9 (F.5)</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Realise the Constitution → Spec → Clarify → Plan → Tasks → Implement → Verify loop on top of Helix's existing six stages. Add the Constitution, the Clarify loop, the Ubiquitous Language glossary, the Builder's TDD task loop, and the Deep-Modules design bias. Rename <code>critic_methods → scout_critic</code> and re-aim its rubric.
+</p>
+
+<h4>F.1 — Constitution <span class="badge b-s">S</span> · Phase 2</h4>
+<table>
+  <tbody>
+    <tr><td><code>src/helix/core/constitution.py</code></td><td><span class="badge b-new">new</span> <code>load_constitution()</code> · <code>save_constitution(text)</code> · YAML frontmatter schema</td><td>Workspace-rooted; per-project override looked up first if present.</td></tr>
+    <tr><td><code>src/helix/cli.py</code></td><td><span class="badge b-mod">mod</span> <code>helix init</code> calls <code>constitution_init_interactive()</code></td><td>Small elicitation: language(s) · framework · testing · style · "done". Defaults are sensible; researcher Enter-skips.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_constitution_init()</code></td><td>For agents to (re)trigger the elicit later.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/*.md</code></td><td><span class="badge b-mod">mod</span> Constitution body is appended to every agent's system prompt</td><td>Loaded by <code>core/agents.load_agent</code> at turn start.</td></tr>
+  </tbody>
+</table>
+
+<h4>F.2/F.3 — Spec + Clarify <span class="badge b-m">M</span> · Phase 6</h4>
+<table>
+  <tbody>
+    <tr><td><code>src/helix/core/spec.py</code></td><td><span class="badge b-mod">mod</span> add <code>scan_clarifications(text)</code></td><td>Finds <code>[NEEDS CLARIFICATION: …]</code> + <code>TODO:</code> + <code>@open-question:</code> markers.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_clarify(project)</code></td><td>Asks one marker at a time via <code>hx_ask</code>; patches the spec in place using anchored SEARCH/REPLACE; returns the open-marker count.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/planner.md</code></td><td><span class="badge b-mod">mod</span> the Planner reads the spec, emits the plan <em>from</em> it; explicitly authorises a Clarify before planning</td><td>Spec drift mid-Planner triggers a send-back to Scout.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/planner.md</code></td><td><span class="badge b-mod">mod</span> include a tasks sub-phase producing <code>projects/&lt;id&gt;/tasks.md</code></td><td>Decomposition into ordered, independently-verifiable units. <code>tasks.md</code> schema: an ordered YAML list of <code>{id, title, deps, acceptance}</code>.</td></tr>
+  </tbody>
+</table>
+
+<h4>F.4 — Ubiquitous Language <span class="badge b-s">S</span> · Phase 5 (rides with E)</h4>
+<table>
+  <tbody>
+    <tr><td><code>src/helix/core/threads.py</code></td><td><span class="badge b-mod">mod</span> glossary is a thread; one term per heading + aliases + links</td><td>Per spec §F.4.</td></tr>
+    <tr><td><code>src/helix/core/lint.py</code></td><td><span class="badge b-mod">mod</span> add <code>vocabulary-drift</code> check</td><td>Scans spec/plan/code for terms not in the glossary; one-click suggestion either to add or rename.</td></tr>
+  </tbody>
+</table>
+
+<h4>F.5 — TDD as the Builder's task loop <span class="badge b-l">L</span> · Phase 9</h4>
+<table>
+  <tbody>
+    <tr><td><code>src/helix/builtin_agents/builder.md</code></td><td><span class="badge b-mod">mod</span> picks the next unmarked task; submits the failing test first; then implements; then refactors; one task per submit</td><td>Prompt-level + the Builder's response schema gains a <code>task_id</code> + <code>phase: test|impl|refactor</code> field.</td></tr>
+    <tr><td><code>src/helix/orchestrator/loop.py</code></td><td><span class="badge b-mod">mod</span> per-task snapshot: each green task is its own snapshot in the Builder's section of the DAG</td><td>Reuses the existing snapshot machinery; adds a <code>task_id</code> to the snapshot meta.</td></tr>
+    <tr><td><code>src/helix/core/agents.py</code></td><td><span class="badge b-mod">mod</span> <code>_map_builder</code> rejects submissions that disable tests, skip the test-first step, or batch multiple tasks</td><td>Hard guardrails per spec §F.5. Failures cleanly become <code>StageResult.error</code> and the existing send-back path picks them up.</td></tr>
+  </tbody>
+</table>
+
+<h4>F.6 + Scout Critic rename <span class="badge b-m">M</span> · Phase 8</h4>
+<table>
+  <tbody>
+    <tr><td><code>src/helix/builtin_agents/critic_methods.md</code> → <code>scout_critic.md</code></td><td><span class="badge b-mod">mod</span> rename file + update <code>name:</code> in frontmatter</td><td>Existing agent. New rubric: rank candidate hypotheses (testable · falsifiable · distinct) + Deep-Modules bias for the upcoming Planner.</td></tr>
+    <tr><td><code>src/helix/core/agents.py</code></td><td><span class="badge b-mod">mod</span> rename in <code>_CONTEXT</code>/<code>_MAP</code>/<code>llm_stages</code>; add <code>core.transitions.next_stage</code> aware of the rename</td><td>Old <code>critic_methods</code> → new <code>scout_critic</code> in the stage order.</td></tr>
+    <tr><td><code>tests/conftest.py</code></td><td><span class="badge b-mod">mod</span> <code>FAKE</code> dict key rename</td><td>One-line.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/planner.md</code></td><td><span class="badge b-mod">mod</span> include the Deep-Modules guidance from APoSD (design it twice; reject shallow modules and pass-through wrappers)</td><td>Rust-RFC <em>Rationale &amp; alternatives</em> section becomes the place to record the "design it twice" trade-offs.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_constitution.py</code>: scaffold + override + injection into agent prompts.</li>
+  <li><code>test_spec.py</code>: marker scanner + Clarify SEARCH/REPLACE patch round-trip.</li>
+  <li><code>test_pipeline.py</code>: TDD task loop forces test-first; per-task snapshots; refuses to disable tests.</li>
+  <li><code>test_lint.py</code>: vocabulary-drift.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="G">Workstream G — Atlas write protocol <span class="badge b-m">M</span></h2>
+<div class="ws-meta">
+  <span>Spec §G + Atlas full tech spec</span>
+  <span>Phase 4</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Replace freeform <code>atlas_writes</code> with a closed action vocabulary (<code>ADD · UPDATE · SUPERSEDE · LINK · NOOP</code>) + a one-line <code>because</code> + mandatory provenance. Add <code>hx_atlas_propose</code> as the dedup gate before <code>ADD</code>. Add <code>hx_atlas_reconcile</code> for periodic dedup + promotion proposals. Add the per-stage trigger map at the prompt level. Add the spec-driven cross-reference (every write declares which spec line it supports/contradicts/extends).
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/sandbox.py</code></td><td><span class="badge b-mod">mod</span> <code>sanitize_atlas_writes</code> accepts/validates <code>action</code> · <code>because</code> · <code>spec_refs</code> · <code>provenance</code></td><td>Drop a write that omits these once we've migrated all stage prompts (compat: warn for one phase, then fail).</td></tr>
+    <tr><td><code>src/helix/core/atlas.py</code></td><td><span class="badge b-mod">mod</span> <code>Atlas.write(writes, message)</code> stamps provenance into frontmatter and applies action semantics</td><td><code>SUPERSEDE</code> writes a <code>superseded_by</code> link forward and tier-bumps the old page to <code>archived</code>; <code>LINK</code> writes only edges.</td></tr>
+    <tr><td><code>src/helix/core/atlas.py</code></td><td><span class="badge b-new">new</span> <code>propose_write(write) -&gt; Proposal</code></td><td>Runs <code>recall(query, k=3, mode="auto")</code> on the write's title/summary/aliases; returns top candidates + a recommended action.</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_atlas_propose(write_json)</code></td><td>Thin wrapper around <code>atlas.propose_write</code>; required before any <code>ADD</code> (G7 recommendation).</td></tr>
+    <tr><td><code>src/helix/mcp/server.py</code></td><td><span class="badge b-new">new</span> <code>@mcp.tool() hx_atlas_reconcile()</code></td><td>Runs lint + dedup + proposes promotions; emits a typed report.</td></tr>
+    <tr><td><code>src/helix/core/lint.py</code></td><td><span class="badge b-mod">mod</span> add <code>orphan-by-policy</code> check</td><td>Pages citing no spec line are flagged with a one-click "link to spec line N".</td></tr>
+    <tr><td><code>src/helix/builtin_agents/*.md</code></td><td><span class="badge b-mod">mod</span> every stage gets the per-stage trigger map verbatim from spec §G</td><td>Replaces "should I write?" ad-hoc with a closed table.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_atlas.py</code>: action semantics (ADD writes; UPDATE merges; SUPERSEDE marks + links forward; LINK adds edges only; NOOP no-ops); provenance enforced.</li>
+  <li><code>test_atlas.py</code>: <code>propose_write</code> returns the top-3 candidates and the recommended action against a populated atlas.</li>
+  <li><code>test_mcp.py</code>: <code>hx_atlas_propose</code> + <code>hx_atlas_reconcile</code> tools work via the in-memory client.</li>
+  <li><code>test_lint.py</code>: <code>orphan-by-policy</code>.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>G-2 (propose required for ADD), G-1 (workspace marker — resolves with A1).</p>
+
+<!-- ===================================================================== -->
+<h2 id="H">Workstream H — Discovery engine <span class="badge b-m">M</span></h2>
+<div class="ws-meta">
+  <span>Spec §H</span>
+  <span>Phase 10</span>
+  <span>Depends on: B · E · F · Scout Critic</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Realise the autonomous hypothesis loop on top of the existing six stages by adding a first-class <code>hypothesis</code> thread, an idea-tournament ranking function in the Scout Critic, a closed-loop <code>autonomy_until: rediscover</code> mode, and the per-hypothesis verdict in Results Critic.
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/core/hypothesis.py</code></td><td><span class="badge b-new">new</span> <code>Hypothesis</code> dataclass · <code>rank(hypotheses) -&gt; ordered</code> (Elo-style)</td><td>Inherits the thread schema from E; adds <code>{type, support, refutations}</code>.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/scout.md</code></td><td><span class="badge b-mod">mod</span> Scout emits the initial hypothesis-thread entries during the Synthesize sub-phase</td><td>Each candidate hypothesis: statement · type · provenance.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/scout_critic.md</code></td><td><span class="badge b-mod">mod</span> Scout Critic ranks the hypotheses (testable · falsifiable · distinct) and writes the ranked order back to the thread</td><td>Co-Scientist's idea-tournament shape.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/critic_results.md</code></td><td><span class="badge b-mod">mod</span> Results Critic returns a verdict per hypothesis (<code>supported · refuted · inconclusive</code>) + a revised hypothesis for the next loop</td><td>Sakana's automated-reviewer shape.</td></tr>
+    <tr><td><code>src/helix/core/plan.py</code></td><td><span class="badge b-mod">mod</span> add <code>autonomy_until = "rediscover"</code> mode</td><td>After Results Critic, auto-restart from Scout with the hypothesis thread carried forward; capped at 3 iterations (H-2) + the existing token/call budget.</td></tr>
+    <tr><td><code>src/helix/core/lint.py</code></td><td><span class="badge b-mod">mod</span> add <code>discovery-log</code> check</td><td>Flags hypotheses marked <code>supported</code> with no validator pass linked.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li><code>test_hypothesis.py</code>: rank function determinism + thread updates per stage.</li>
+  <li><code>test_pipeline.py</code>: end-to-end <code>autonomy_until: rediscover</code> drives N iterations, capped; the thread evolves across iterations.</li>
+  <li><code>test_lint.py</code>: discovery-log.</li>
+</ul>
+
+<h4>Open decisions</h4>
+<p>H-1 (schema details), H-2 (iteration cap), H-3 (ranking is Scout-Critic function).</p>
+
+<!-- ===================================================================== -->
+<h2 id="I">Workstream I — Skills &amp; plugins <span class="badge b-s">S</span></h2>
+<div class="ws-meta">
+  <span>Spec §I</span>
+  <span>Phase 11</span>
+</div>
+<h4>Goal</h4>
+<p>
+  Prompt-level instructions per stage to use installed Claude Code skills/plugins where available (WebSearch · WebFetch · <code>simplify</code> · <code>review</code> · <code>security-review</code> · <code>superpowers</code>). <code>helix init</code> writes a README section listing recommended installs. Vendor only <code>obra/superpowers</code> (MIT) — with attribution.
+</p>
+
+<h4>File-level changes</h4>
+<table>
+  <thead><tr><th>File</th><th>Change</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/helix/cli.py</code></td><td><span class="badge b-mod">mod</span> <code>helix init</code> writes a <code>AGENTS.md</code> at workspace root with a "recommended skills" section</td><td>Per AGENTS.md open standard.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/scout.md</code></td><td><span class="badge b-mod">mod</span> instruct to use WebSearch/WebFetch + an Elicit-style structured-extraction procedure (a recommended <code>superpowers</code> skill if installed)</td><td>Graceful: "use if available".</td></tr>
+    <tr><td><code>src/helix/builtin_agents/builder.md</code></td><td><span class="badge b-mod">mod</span> after writing code artifacts, instruct to run <code>simplify</code> and a code-review skill on them before submitting</td><td>Graceful.</td></tr>
+    <tr><td><code>src/helix/builtin_agents/critic_results.md</code></td><td><span class="badge b-mod">mod</span> instruct to run <code>security-review</code> when artifacts contain code</td><td>Graceful.</td></tr>
+    <tr><td><code>vendor/superpowers/</code> (optional)</td><td><span class="badge b-new">new</span> include a copy of <code>obra/superpowers</code> with its LICENSE + NOTICE crediting Jesse Vincent</td><td>Only if I-1 chooses "vendor"; otherwise the README points at the upstream repo.</td></tr>
+  </tbody>
+</table>
+
+<h4>Tests</h4>
+<ul>
+  <li>No new code tests; manual: install Claude Code with the recommended plugins, run a Scout step end-to-end, verify the agent uses the skills.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="cross">Cross-cutting concerns</h2>
+
+<h3>Invariants to preserve (per CLAUDE.md)</h3>
+<ul>
+  <li><strong>Dependency-light core</strong> — <code>helix.core</code>, <code>helix.io</code>, <code>helix.orchestrator.loop</code> import without <code>mcp</code> or <code>fastembed</code>. New modules <code>core/spec.py</code> · <code>core/threads.py</code> · <code>core/reports.py</code> · <code>core/constitution.py</code> · <code>core/hypothesis.py</code> all obey this.</li>
+  <li><strong>One router</strong> — every send-back path goes through <code>core.transitions.next_stage</code>. <code>send_back</code> is just <code>goto &lt;stage&gt;</code> with structured feedback.</li>
+  <li><strong>One runner</strong> — <code>loop.advance</code> stays the unit, re-entered per <code>hx_submit</code>. New sub-phase work (B) sits inside the agent's <em>turn</em>, not in a parallel runner.</li>
+  <li><strong>A snapshot never calls a model</strong> — <code>render_report</code> is data-driven from the Decision Card + threads + spec; no model in the renderer.</li>
+  <li><strong>Agent-driven, no credentials</strong> — no new sampling. Skills/plugins are the agent's own tools, exercised in its turn.</li>
+  <li><strong>Sandbox-first</strong> — all new writes (reports HTML · threads · constitution · datasets · tasks) flow through <code>sandbox.sanitize_*</code> and <code>validate_project_name</code>.</li>
+</ul>
+
+<h3>Testing strategy</h3>
+<table>
+  <thead><tr><th>Layer</th><th>Harness</th><th>What it covers</th></tr></thead>
+  <tbody>
+    <tr><td>Core (pure)</td><td>direct pytest</td><td>spec.py · threads.py · reports.py · constitution.py · hypothesis.py · atlas action semantics · lint check kinds</td></tr>
+    <tr><td>Pipeline</td><td><code>app.run</code> harness with <code>conftest.fake_llm</code></td><td>Sub-phase enforcement; TDD guardrails; thread evolution; rediscover loop iteration cap</td></tr>
+    <tr><td>MCP drive surface</td><td>in-memory MCP client</td><td>hx_ask · hx_question_check · hx_clarify · hx_atlas_propose · hx_atlas_reconcile · hx_report_send_back · thread:// resource</td></tr>
+    <tr><td>Round-trip</td><td>render → modify HTML in test → parse</td><td>Annotation overlay JSON parse/emit; CriticMarkup patch apply</td></tr>
+    <tr><td>Browser (manual)</td><td>open <code>file://</code> in Chrome/Edge</td><td>File System Access API save-in-place; overlay UX</td></tr>
+  </tbody>
+</table>
+
+<h3>Migration</h3>
+<ul>
+  <li>Existing per-project atlases (A regression aftermath) continue to work via the run-root fallback; document an <code>hx_atlas_consolidate</code> recipe for users who want to migrate a per-project atlas into the workspace.</li>
+  <li>Existing markdown reports (none in production today; the gate text is just a string): no migration needed.</li>
+  <li><code>critic_methods → scout_critic</code> rename: existing snapshots referencing <code>critic_methods</code> stay readable; <code>core.transitions</code> aliases the old name for one phase.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="milestones">Milestones &amp; definition-of-done</h2>
+<table>
+  <thead><tr><th>Phase</th><th>Ships</th><th>Definition of done</th><th>Target test count</th></tr></thead>
+  <tbody>
+    <tr><td>1 · A</td><td>Workspace &amp; init</td><td><code>helix init</code> idempotent · <code>helix new</code> works · two-roots resolved · conftest updated · existing 99 tests still green</td><td>≥ 99 + 6 new = 105</td></tr>
+    <tr><td>2 · F.1</td><td>Constitution</td><td>scaffolded by <code>helix init</code> · injected into every agent prompt · per-project override works</td><td>≥ 108</td></tr>
+    <tr><td>3 · D</td><td>HTML reports + overlay + send-back</td><td>renderer emits valid self-contained HTML · overlay JS parses/writes JSON · <code>hx_report_send_back</code> round-trips a modified HTML into a stage re-run · gate prompt includes the <code>file://</code> link · <code>stale-report</code> lint passes</td><td>≥ 118</td></tr>
+    <tr><td>4 · G</td><td>Atlas write protocol + propose + reconcile</td><td>action vocabulary enforced in <code>sandbox</code> · <code>hx_atlas_propose</code> dedups · <code>hx_atlas_reconcile</code> runs lint+dedup+propose · <code>orphan-by-policy</code> lint</td><td>≥ 125</td></tr>
+    <tr><td>5 · E + F.4</td><td>Threads incl. data + glossary</td><td><code>thread://</code> resource · datasets entities · vocabulary-drift / orphan-thread / dataset-* lints</td><td>≥ 132</td></tr>
+    <tr><td>6 · F.2/F.3 + B</td><td>Spec + Clarify + Scout interview</td><td>spec.py schema · <code>hx_question_check</code> · <code>hx_clarify</code> · Scout sub-phase prompt · skip-to-full option · agent-driven Scout passes the gate</td><td>≥ 142</td></tr>
+    <tr><td>7 · C</td><td>hx_ask</td><td>tool works · Q&amp;A recorded in pending · prompts of every stage authorise it</td><td>≥ 145</td></tr>
+    <tr><td>8 · Scout Critic + F.6</td><td>Critic rename + Deep-Modules rubric</td><td><code>critic_methods → scout_critic</code> · Planner prompt has design-it-twice + Rationale &amp; alternatives discipline · Builder Critic flags shallow modules</td><td>≥ 148</td></tr>
+    <tr><td>9 · F.5</td><td>TDD task loop</td><td>Builder pulls one task at a time · failing test first enforced · per-task snapshot · refuses disable-tests / skip-test / batched submissions</td><td>≥ 154</td></tr>
+    <tr><td>10 · H</td><td>Discovery engine</td><td>hypothesis thread · Scout-Critic ranking · per-hypothesis verdict · <code>autonomy_until: rediscover</code> · <code>discovery-log</code> lint</td><td>≥ 160</td></tr>
+    <tr><td>11 · I</td><td>Skills/plugins</td><td>per-stage prompt instructions · <code>AGENTS.md</code> at workspace root · optional <code>obra/superpowers</code> vendoring</td><td>≥ 162</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================================================================== -->
+<h2 id="risks">Risks &amp; mitigations</h2>
+<table>
+  <thead><tr><th>Risk</th><th>Where</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>A regresses self-rooting</td><td>Phase 1</td><td>Add a regression test that asserts a run under <code>use_root(project)</code> writes snapshots/runs/pending under <code>project</code> AND atlas under the workspace marker. Run before declaring Phase 1 done.</td></tr>
+    <tr><td>Single-file HTML round-trip browser support</td><td>Phase 3</td><td>File System Access API in Chromium; clear download-fallback button. Document the non-Chromium recipe (open HTML · annotate · Download annotated copy · replace in <code>projects/&lt;id&gt;/reports/</code>).</td></tr>
+    <tr><td>Scout's sub-phase prompt blows the context budget</td><td>Phase 6</td><td>Per-sub-phase prompt sectioning; lazy include only the relevant question set; the Constitution adds ~10 lines max. Test that the rendered prompt stays under a chosen ceiling (e.g., 8K tokens).</td></tr>
+    <tr><td>Per-stage trigger map (G) breaks existing tests that emit ad-hoc <code>atlas_writes</code></td><td>Phase 4</td><td>One-phase compat: sanitizer warns on missing <code>action</code>/<code>because</code>/<code>provenance</code>, falls back to <code>ADD</code>/<code>"agent-emitted"</code>/derived; switch to hard-fail after F.2 prompts are updated.</td></tr>
+    <tr><td>The rediscover loop drains the budget on a misranked hypothesis</td><td>Phase 10</td><td>Hard cap (H-2 = 3); each iteration must improve the top-ranked hypothesis or the loop exits; Validator failures pause the loop.</td></tr>
+    <tr><td>Skills/plugins vary across researcher machines</td><td>Phase 11</td><td>All instructions are "use when available"; no hard dep. Run init records detected skills into the hot cache so the agent knows what's there.</td></tr>
+    <tr><td>Annotation anchoring drifts after a re-render</td><td>Phase 3</td><td>Use Hypothes.is fuzzy anchoring (3 selectors per annotation); on drift, the overlay falls back to FragmentSelector (section anchor) and marks the annotation as <em>moved</em>.</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================================================================== -->
+<h2 id="open">Open implementation questions</h2>
+<ol>
+  <li><strong>Where does the overlay JS bundle source live?</strong> Recommendation: a single hand-authored <code>src/helix/core/reports/overlay.js</code> + <code>overlay.css</code> read at render time and inlined (no build step). Alternative: a tiny TypeScript build under <code>js/</code> with esbuild — only if the JS grows.</li>
+  <li><strong>How is the <code>file://</code> link rendered in non-clickable terminals?</strong> Recommendation: print the URL on its own line so terminals that auto-link still recognise it; document a <code>helix open &lt;project&gt; --report &lt;stage&gt;</code> CLI alternative.</li>
+  <li><strong>Per-task snapshots in F.5: does each test-first / impl / refactor get its own snapshot, or only the green tasks?</strong> Recommendation: only green tasks (one snapshot per completed task) — the red phase is a fast-failing iteration inside the Builder's turn.</li>
+  <li><strong>The Scout Critic doing the ranking <em>and</em> the critique — does it confuse the rubric?</strong> Recommendation: a single prompt with two named sections (Rank · Critique) — the Critic's HTML report puts ranking in <em>What I found</em>, critique in <em>Recommendations</em>.</li>
+  <li><strong>Migration story for atlases created since the A regression</strong>: document a recipe; no auto-migration (per A6 recommendation). Open question: should <code>helix new</code> detect a pre-existing <code>atlas/</code> in the project folder and offer to move it to the workspace?</li>
+</ol>
+
+<hr>
+<p class="small">
+  Plan v1 · Draft · companion to <a href="0001-helix-improvements.html">spec 0001 v6</a>.
+  Diagrams rendered with Mermaid (CDN) at view time.
+</p>
+
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  (function () {
+    const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'default',
+      securityLevel: 'loose', flowchart: { curve: 'basis' } });
+  })();
+</script>
+</body>
+</html>

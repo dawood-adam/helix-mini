@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Conceptual architecture · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>conceptual architecture</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="architecture-conceptual.html" class="active">Conceptual</a>
+      <a href="architecture-technical.html">Technical</a>
+      <a href="forge.html">Forge</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#shape">The shape</a></li>
+    <li><a href="#three-things">Three things Helix is</a></li>
+    <li><a href="#two-loops">Two loops</a></li>
+    <li><a href="#layered-memory">Layered memory</a></li>
+    <li><a href="#discipline">Where the discipline comes from</a></li>
+    <li><a href="#why-mcp">Why MCP, why agent-driven</a></li>
+    <li><a href="#trust">Trust boundaries</a></li>
+    <li><a href="#related">Related work</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Conceptual architecture</h1>
+<p class="lede">What Helix is, why it's shaped this way, and how to read the rest of the docs.</p>
+
+<h2 id="shape">The shape</h2>
+
+<p>
+  Helix is a thin, opinionated server that orchestrates a research
+  project the way a good lab does:
+</p>
+
+<ol>
+  <li>Read the room (Scout).</li>
+  <li>Red-team the framing (Scout Critic).</li>
+  <li>Plan a validation (Planner).</li>
+  <li>Build it (Builder, test-first).</li>
+  <li>Check it deterministically (Validator).</li>
+  <li>Decide what it means (Results Critic).</li>
+</ol>
+
+<p>
+  There is a checkpoint at every transition. The pipeline pauses, shows
+  you what just happened, and waits for you to <em>proceed</em>,
+  <em>send back</em> with a directive, or <em>stop</em>. Every
+  transition is captured as a snapshot — a tiny, content-addressed JSON
+  record — so the history is a real version-control tree and the run
+  is resumable from any point.
+</p>
+
+<p>
+  Outside the pipeline lives the <strong>Atlas</strong>: a markdown
+  wiki, on disk, with typed YAML frontmatter. Every stage reads from it
+  and writes to it. A second project in the same workspace starts with
+  the first project's knowledge already present.
+</p>
+
+<div class="mermaid">
+flowchart LR
+  subgraph project[A project]
+    direction LR
+    Q[question.md] --> P[pipeline]
+    P --> R[results + snapshots]
+  end
+  subgraph workspace[Workspace]
+    A[(Atlas — shared knowledge)]
+  end
+  project &lt;--&gt; A
+  project &lt;--&gt; project2[Next project] &lt;--&gt; A
+  classDef wsbox fill:#ddf4ff,stroke:#0550ae;
+  classDef pjbox fill:#dafbe1,stroke:#1a7f37;
+  class workspace wsbox
+  class project,project2 pjbox
+</div>
+
+<h2 id="three-things">Three things Helix is</h2>
+
+<p>It helps to read Helix as <em>three things that share one server</em>:</p>
+
+<div class="cards">
+  <div class="card">
+    <div class="meta">Pipeline</div>
+    <h3>Forge</h3>
+    <p>Six stages with a structured output contract per stage and a
+    Decision Card every stage emits — the single human-readable
+    record. Each transition is a checkpoint where you stay in control.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Wiki</div>
+    <h3>Atlas</h3>
+    <p>The cross-project memory. Typed pages with maturity tiers
+    (scratch → active → canonical → published → archived) and a
+    closed write vocabulary (ADD · UPDATE · SUPERSEDE · LINK · NOOP)
+    so every write is auditable.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Version control</div>
+    <h3>Snapshots</h3>
+    <p>A content-addressed DAG. Branch to explore alternatives.
+    Freeze to publish. Fork to share — the whole history packs into
+    one <code>.tar.gz</code> you can hand to a collaborator.</p>
+  </div>
+</div>
+
+<h2 id="two-loops">Two loops</h2>
+
+<p>
+  Underneath the six stages, two loops run in concert:
+</p>
+
+<ol>
+  <li>The <strong>execution loop</strong> — Scout, Critic, Plan, Build,
+    Validate, Review — that any research project walks once.</li>
+  <li>The <strong>discovery loop</strong> — <em>propose → validate →
+    revise</em> — which iterates across the execution loop, carrying a
+    hypothesis thread forward each iteration. Activated by
+    <code>autonomy_until: "rediscover"</code>; capped at three
+    iterations to bound spend.</li>
+</ol>
+
+<div class="mermaid">
+flowchart LR
+  H((hypothesis thread)) --> S
+  S[Scout] --> SC[Scout Critic] --> P[Planner] --> B[Builder] --> V[Validator] --> RC[Results Critic]
+  RC --rediscover--> S
+  RC --supports / refutes--> H
+  classDef pipe fill:#ddf4ff,stroke:#0550ae;
+  classDef thread fill:#fff8c5,stroke:#bf3989,color:#573a08;
+  class S,SC,P,B,V,RC pipe
+  class H thread
+</div>
+
+<p>
+  The discovery loop is the same six stages, run again, with the
+  prior iteration's outcomes (supported / refuted / inconclusive
+  hypotheses) carried in the <code>hypothesis</code> thread. This is
+  the Co-Scientist / Sakana shape, priced for a laptop.
+</p>
+
+<h2 id="layered-memory">Layered memory</h2>
+
+<p>
+  Three layers of memory work together; each has a clearly defined
+  scope:
+</p>
+
+<table>
+  <tr><th>Layer</th><th>Scope</th><th>What it holds</th><th>Lifetime</th></tr>
+  <tr><td><strong>Pipeline state</strong></td><td>per run</td><td>Current stage, sources, candidate approaches, plan, artifacts, results, verdict, feedback queue.</td><td>Serialized into every snapshot.</td></tr>
+  <tr><td><strong>Threads</strong></td><td>per project</td><td>Longitudinal artifacts (<code>hypothesis · data · spec · plan · design · code-org · glossary</code>) updated by every stage. One YAML-frontmatter page per thread, with one <code>## snap-&lt;id&gt;</code> section per snapshot.</td><td>Survives across runs of the same project; bi-temporal (read at any snapshot).</td></tr>
+  <tr><td><strong>Atlas</strong></td><td>workspace</td><td>Sources, concepts, entities, datasets, methods, glossary terms — typed and tiered. The cross-project knowledge base.</td><td>Persists indefinitely; pruned via lint and the tier ladder.</td></tr>
+</table>
+
+<p>
+  The Atlas is the long-term memory; threads carry per-project
+  evolution; pipeline state is the short-term scratchpad of one run.
+  All three are serialized as plain markdown / YAML on disk — git-
+  friendly, greppable, and human-readable.
+</p>
+
+<h2 id="discipline">Where the discipline comes from</h2>
+
+<p>
+  Helix borrows shapes that other communities have already proved
+  out, and wires them together as small, composable modules:
+</p>
+
+<table>
+  <tr><th>Discipline</th><th>From</th><th>In Helix</th></tr>
+  <tr><td>Constitution → Spec → Clarify → Plan → Tasks → Implement → Verify</td><td>GitHub Spec Kit</td><td><code>helix init</code> writes <code>constitution.md</code>; Scout produces a typed spec; <code>hx_clarify</code> walks unresolved markers; Planner emits tasks; Builder runs the TDD loop.</td></tr>
+  <tr><td>Decision Records</td><td>Rust RFCs, MADR, blameless PIRs</td><td>Per-stage HTML report templates: <em>IMRaD+PRISMA</em> for Scout, <em>blameless PIR</em> for the critics, <em>Rust-RFC</em> for the Planner, <em>MADR+PR-checklist</em> for the Builder, <em>verdict</em> for Results Critic.</td></tr>
+  <tr><td>Bi-temporal claims</td><td>Graphiti, knowledge-graph literature</td><td>Every Atlas page carries <code>claim_valid_at</code> (when the strongest claim was made) and <code>last_verified_at</code> (when last reconciled). The lint <em>stale</em> check uses both.</td></tr>
+  <tr><td>Idea tournaments</td><td>Google's AI Co-Scientist, Sakana AI Scientist-v2</td><td>Scout Critic ranks candidate hypotheses on <em>testable · falsifiable · distinct</em> and writes the ordered list back to the hypothesis thread.</td></tr>
+  <tr><td>Annotation overlay</td><td>W3C Web Annotation Data Model, Hypothes.is, Distill side-notes</td><td>Stage reports are single-file HTML with an embedded annotation JSON block and a Distill-style margin overlay; round-trip via the File System Access API.</td></tr>
+  <tr><td>Closed memory action vocabulary</td><td>mem0, Letta, Graphiti</td><td>Every Atlas write declares ADD / UPDATE / SUPERSEDE / LINK / NOOP, a one-line <code>because</code>, and a spec cross-reference.</td></tr>
+  <tr><td>Deep modules</td><td>Ousterhout, <em>A Philosophy of Software Design</em></td><td>Planner's prompt and report template ask for a "design it twice" record — the rejected alternative and why — and lint catches shallow modules.</td></tr>
+</table>
+
+<h2 id="why-mcp">Why MCP, why agent-driven</h2>
+
+<p>
+  Helix is an <strong>MCP server</strong> — one stdio process the
+  client launches on demand. That choice does three things at once:
+</p>
+
+<ul>
+  <li><strong>Consent.</strong> The client (Claude Code) shows a
+    confirmation before any state-changing tool runs. Helix doesn't
+    have to reinvent a permission model.</li>
+  <li><strong>Tool catalog.</strong> The agent sees a small, curated
+    set of tools and resources — no general code-exec, no arbitrary
+    shell. The agent <em>has</em> to use Helix's vocabulary.</li>
+  <li><strong>Composition.</strong> Whatever skills / plugins the
+    user's Claude Code has installed (WebSearch, WebFetch,
+    <code>simplify</code>, <code>security-review</code>, …) are
+    available to Helix's agents transparently — the agent uses them
+    in its own turn.</li>
+</ul>
+
+<p>
+  And it's <strong>agent-driven</strong>, not sampling-driven, for a
+  pragmatic reason: Claude Code does not implement MCP
+  <code>sampling</code>. Inverting the dependency — Helix hands the
+  prompt back, the agent answers, Helix continues — solves the
+  problem without adding credentials, providers, or processes. The
+  agent is the model, on the user's own plan; the server holds no
+  keys.
+</p>
+
+<h2 id="trust">Trust boundaries</h2>
+
+<p>
+  Three boundaries to keep in mind:
+</p>
+
+<div class="cards">
+  <div class="card">
+    <div class="meta">Outer</div>
+    <h3>You ↔ the agent</h3>
+    <p>You talk to Claude Code in natural language. The agent decides
+    when to call which tool. The MCP client surfaces a confirmation
+    before any state-changing tool fires.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Middle</div>
+    <h3>Agent ↔ the server</h3>
+    <p>The agent calls a fixed catalog of MCP tools. Every tool that
+    writes to disk passes its arguments through the
+    <code>sandbox</code> module — names through
+    <code>validate_project_name</code>, content through
+    <code>sanitize_atlas_writes</code> / <code>sanitize_code_artifacts</code>.</p>
+  </div>
+  <div class="card">
+    <div class="meta">Inner</div>
+    <h3>Server ↔ the filesystem</h3>
+    <p>The Atlas is markdown on disk; snapshots are JSON + content-
+    addressed objects. <code>Atlas._safe_resolve</code> defends every
+    Atlas path against traversal; <code>spec_path</code> and
+    <code>_resolve_path</code> (for threads) do the same for their
+    files.</p>
+  </div>
+</div>
+
+<h2 id="related">Related work</h2>
+
+<p>
+  Helix doesn't try to be a research lab in a box. It is a thin
+  scaffold that <em>combines</em> patterns from agentic engineering,
+  knowledge-graph literature, and decision-oriented programming:
+</p>
+
+<ul>
+  <li>GitHub <strong>Spec Kit</strong> — the seven-step engineering
+    cycle Helix mirrors at the prompt level.</li>
+  <li>Aporia's <em>Decision-Oriented Programming</em> —
+    <code>hx_clarify</code> is its named-question elicitation pattern.</li>
+  <li><strong>STORM</strong>, <strong>Elicit</strong>, OpenAI
+    <strong>Deep Research</strong>, Sakana <strong>AI Scientist-v2</strong>,
+    Google <strong>AI Co-Scientist</strong>, <strong>FunSearch</strong>,
+    <strong>Coscientist</strong> — Helix's discovery loop sits in
+    this neighbourhood, intentionally simpler (six stages, a hard
+    iteration cap, all running on the user's own model).</li>
+  <li><strong>Graphiti</strong> — the bi-temporal pair
+    (<code>claim_valid_at</code>, <code>last_verified_at</code>) on
+    every page; threads' <code>thread-at://</code> bi-temporal read.</li>
+  <li>Domain-Driven Design's <strong>Ubiquitous Language</strong> —
+    the glossary thread + <em>vocabulary-drift</em> lint.</li>
+</ul>
+
+<p>
+  For implementation details — module layout, request flow,
+  invariants — continue to the
+  <a href="architecture-technical.html">technical architecture</a>.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="index.html">← Docs home</a> &nbsp;·&nbsp;
+  <a href="architecture-technical.html">Technical architecture →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

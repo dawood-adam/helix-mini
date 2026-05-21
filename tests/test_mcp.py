@@ -40,7 +40,7 @@ _AGENT_ANSWERS = {
              "feasibility": "low"}],
         "atlas_writes": [{"path": "sources/paper.md", "title": "Paper",
                           "content": "c", "summary": "s"}]},
-    "critic_methods": {
+    "scout_critic": {
         "critiques": [{"approach_id": "approach-1", "strengths": "x",
                        "weaknesses": "y", "severity": "info",
                        "recommendation": "go"}],
@@ -478,36 +478,50 @@ def test_use_root_overrides_home_and_resets(tmp_path, monkeypatch):
 
 
 def test_run_is_self_rooted_under_folder_not_server_cwd(tmp_path, monkeypatch):
-    """The structural fix: a run lands entirely under its source folder even
-    when HELIX_HOME (the server's launch root) points somewhere unrelated —
-    so a misrooted/stale server can no longer silently write a run into the
-    wrong project."""
+    """Two-roots structural model (Phase 1, Workstream A):
+    **operational state** (snapshots / runs / pending) lives at the
+    *project* root under <code>use_root</code> — the self-rooting safety
+    holds; **the Atlas** lives at the *workspace* root, discovered by an
+    ancestor walk-up. So a misrooted server can't silently write a run's
+    operational state into the wrong project, AND the Atlas compounds
+    across all projects in the workspace."""
     pytest.importorskip("mcp")
     from helix import config, runs
     from helix.core.snapshots import list_snapshots
 
-    server_home = tmp_path / "unrelated-server-cwd"
-    server_home.mkdir()
-    monkeypatch.setenv("HELIX_HOME", str(server_home))  # server rooted here
-    proj = tmp_path / "bpalgo"                           # ...run targets here
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "helix.toml").write_text(
+        '[workspace]\n[atlas]\npath = "atlas"\n')
+    proj = workspace / "bpalgo"
     proj.mkdir()
     (proj / "paper.md").write_text("rPPG BP source")
     (proj / "helix.toml").write_text(
-        '[atlas]\npath = "atlas"\n\n[limits]\ntoken_cap = 0\ncall_cap = 0\n')
+        '[limits]\ntoken_cap = 0\ncall_cap = 0\n')
+    server_home = tmp_path / "unrelated-server-cwd"
+    server_home.mkdir()
+    monkeypatch.setenv("HELIX_HOME", str(server_home))   # misrooted server
 
     final, seen = _drive_steps(str(proj))
     assert "done (stages=6" in final, final
 
-    # Everything the run produced is under the *folder*, not the server root.
+    # Operational state (snapshots/runs/pending) is per-project (self-rooting).
     assert (proj / ".helix" / "snapshots").is_dir()
-    assert (proj / "atlas").is_dir()
-    assert not (server_home / ".helix").exists()
+    # Atlas is at the WORKSPACE (cross-project knowledge base) — not the
+    # project, and not the unrelated server cwd.
+    assert (workspace / "atlas").is_dir()
+    assert not (proj / "atlas").exists()
     assert not (server_home / "atlas").exists()
+    assert not (server_home / ".helix").exists()
 
-    # Read-back is consistent only when resolved at the folder root — proof
-    # the data really moved there (and why a per-project server is needed).
-    assert runs.get_record(project="bpalgo") is None  # HELIX_HOME=server_home
+    # Read-back (no use_root bound) finds the workspace marker via ancestor
+    # walk-up from HELIX_HOME=server_home — which is OUTSIDE the workspace,
+    # so the walk-up doesn't find it and atlas falls back to HELIX_HOME.
+    # Re-rooting to the project finds the workspace + the run record.
+    assert runs.get_record(project="bpalgo") is None  # HELIX_HOME elsewhere
     with config.use_root(proj):
+        assert config.workspace_root() == workspace.resolve()
+        assert config.atlas_path() == (workspace / "atlas").resolve()
         rec = runs.get_record(project="bpalgo")
         assert rec is not None and rec.status == "done"
         assert len(list_snapshots("bpalgo")) == 7  # init + 6 stages
@@ -526,7 +540,7 @@ def test_pipeline_runs_agent_driven_without_sampling(project):
     final, seen = _drive_steps(str(project))
     assert "done (stages=6" in final, final
     # Five LLM stages round-tripped; deterministic validator ran in-loop.
-    assert seen == ["scout", "critic_methods", "planner", "builder",
+    assert seen == ["scout", "scout_critic", "planner", "builder",
                     "critic_results"]
     name = project.stem
     assert len(list_snapshots(name)) == 7  # init "start" + 6 stage snapshots
@@ -534,3 +548,68 @@ def test_pipeline_runs_agent_driven_without_sampling(project):
     assert rec is not None and rec.status == "done"
     assert runs.get_pending(name) is None  # consumed
     assert (project / "atlas" / "projects" / name / "overview.md").is_file()
+
+
+# --- Workstream A · two-roots: workspace (Atlas) + project (snapshots) ------
+
+
+def test_workspace_marker_routes_atlas_to_workspace_root(tmp_path, monkeypatch):
+    """A workspace marker file in an ancestor of the project root makes
+    ``config.atlas_path()`` resolve at the workspace — the cross-project
+    knowledge base — while ``helix_dir()`` (snapshots/runs/pending) stays
+    rooted at the project. The self-rooting safety holds; the v5 Atlas
+    regression is fixed."""
+    from helix import config
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "helix.toml").write_text(
+        '[workspace]\n[atlas]\npath = "atlas"\n')
+    project = workspace / "proj-a"
+    project.mkdir()
+    (project / "helix.toml").write_text("[limits]\ntoken_cap = 0\n")
+    monkeypatch.setenv("HELIX_HOME", str(project))
+
+    # Outside a run: HELIX_HOME=project; workspace_root walks up to find
+    # the marker; atlas resolves to the workspace.
+    assert config.project_root() == project.resolve()
+    assert config.workspace_root() == workspace.resolve()
+    assert config.atlas_path() == (workspace / "atlas").resolve()
+
+    # Inside a run (use_root bound to the project): same workspace, same
+    # per-project helix_dir. Snapshots/runs/pending stay per-project.
+    with config.use_root(project):
+        assert config.project_root() == project.resolve()
+        assert config.helix_dir() == (project / ".helix").resolve()
+        assert config.workspace_root() == workspace.resolve()
+        assert config.atlas_path() == (workspace / "atlas").resolve()
+
+
+def test_no_workspace_marker_falls_back_to_project(tmp_path, monkeypatch):
+    """Pre-Phase-1 layouts (no workspace marker anywhere) keep working: the
+    project IS the workspace. This is the back-compat fallback that keeps
+    the existing test suite green."""
+    from helix import config
+
+    project = tmp_path / "lonely-proj"
+    project.mkdir()
+    (project / "helix.toml").write_text(
+        '[atlas]\npath = "atlas"\n[limits]\ntoken_cap = 0\n')
+    monkeypatch.setenv("HELIX_HOME", str(project))
+
+    # No marker anywhere → workspace_root falls back to HELIX_HOME (the project).
+    assert config.workspace_root() == project.resolve()
+    assert config.atlas_path() == (project / "atlas").resolve()
+
+
+def test_helix_atlas_env_overrides_workspace_discovery(tmp_path, monkeypatch):
+    """``HELIX_ATLAS`` is an explicit absolute atlas path; the workspace is
+    its parent. Useful for tests and one-off setups."""
+    from helix import config
+
+    custom = tmp_path / "alt-atlas-root" / "atlas"
+    custom.mkdir(parents=True)
+    monkeypatch.setenv("HELIX_ATLAS", str(custom))
+    monkeypatch.setenv("HELIX_HOME", str(tmp_path))
+    assert config.atlas_path() == custom.resolve()
+    assert config.workspace_root() == custom.parent.resolve()

@@ -31,6 +31,6 @@ def test_autonomy_until_builder_asks_only_from_builder(project, fake_llm):
                 autonomy_until="builder", ask=ask, interactive=True)
     assert r.error is None
     # Gates before 'builder' auto-proceeded; asked only from builder onward.
-    assert "scout" not in asked and "critic_methods" not in asked
+    assert "scout" not in asked and "scout_critic" not in asked
     assert "planner" not in asked
     assert "builder" in asked

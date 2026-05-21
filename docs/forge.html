@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Forge — the pipeline · Helix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="inner">
+    <div class="brand"><a href="index.html" style="color:inherit;">Helix</a> <span>forge — the pipeline</span></div>
+    <nav class="crumbs">
+      <a href="index.html">Docs</a>
+      <a href="quickstart.html">Quickstart</a>
+      <a href="usage.html">Usage</a>
+      <a href="forge.html" class="active">Forge</a>
+      <a href="gates.html">Gates</a>
+      <a href="atlas.html">Atlas</a>
+      <a href="snapshots.html">Snapshots</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>On this page</h4>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#decision-card">The Decision Card</a></li>
+    <li><a href="#stages">The six stages</a></li>
+    <li class="indent"><a href="#scout">1. Scout</a></li>
+    <li class="indent"><a href="#scout-critic">2. Scout Critic</a></li>
+    <li class="indent"><a href="#planner">3. Planner</a></li>
+    <li class="indent"><a href="#builder">4. Builder</a></li>
+    <li class="indent"><a href="#builder-tdd">↳ TDD task loop</a></li>
+    <li class="indent"><a href="#validator">5. Validator</a></li>
+    <li class="indent"><a href="#critic-results">6. Results Critic</a></li>
+    <li><a href="#reports">Stage HTML reports</a></li>
+    <li><a href="#constitution">Constitution &amp; spec</a></li>
+    <li><a href="#authoring">Authoring a custom agent</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Forge — the pipeline</h1>
+<p class="lede">Six stages, with a human checkpoint at every transition. Agent-driven; the server runs no model.</p>
+
+<h2 id="overview">Overview</h2>
+
+<div class="mermaid">
+flowchart LR
+  S([Scout]) --> SC([Scout Critic])
+  SC --> P([Planner])
+  P --> B([Builder])
+  B --> V([Validator])
+  V --> RC([Results Critic])
+  V -.->|hard miss| B
+  RC -.->|iterate| B
+  RC -.->|rediscover| S
+  classDef llm fill:#ddf4ff,stroke:#0550ae,color:#0550ae;
+  classDef det fill:#dafbe1,stroke:#1a7f37,color:#1a7f37;
+  class S,SC,P,B,RC llm
+  class V det
+</div>
+
+<p>
+  Five LLM stages (blue) and one deterministic stage (green). Solid
+  edges are the normal forward path; dashed edges are deterministic
+  routes the orchestrator takes without asking:
+</p>
+
+<ul>
+  <li><strong>hard miss</strong> — the Validator found at least one
+    <code>HARD: …</code> band miss; route back to Builder with the
+    flags as feedback.</li>
+  <li><strong>iterate</strong> — Results Critic returned
+    <code>verdict: iterate</code>; route back to Builder with the
+    recommendations.</li>
+  <li><strong>rediscover</strong> — the run is in
+    <code>autonomy_until: "rediscover"</code> mode; after Results
+    Critic, restart from Scout (capped at 3 iterations).</li>
+</ul>
+
+<p>
+  Stages are markdown files in <code>src/helix/builtin_agents/</code>.
+  A project may override any of them with
+  <code>&lt;project&gt;/agents/&lt;stage&gt;.md</code> — no code
+  change. Frontmatter declares the stage order, kind, whether the
+  stage may write the Atlas, and when the snapshot is minted; the body
+  is the system prompt + output contract.
+</p>
+
+<h2 id="decision-card">The Decision Card</h2>
+
+<p>
+  Every stage emits one structured object alongside its domain output:
+</p>
+
+<pre><code>{
+  "summary":             "2-3 sentences: what you did + the key decision",
+  "key_findings":        ["…", "…"],
+  "assumptions":         ["…"],
+  "open_questions":      ["…"],
+  "directive_for_next":  "what the next stage should focus on",
+  "confidence":          "low | medium | high"
+}</code></pre>
+
+<p>
+  The Decision Card is the single human-readable record of a stage.
+  It is:
+</p>
+
+<ul>
+  <li>Stored verbatim in the snapshot (so snapshotting stays
+    zero-LLM).</li>
+  <li>Read aloud at the gate.</li>
+  <li>The basis for the per-stage HTML report.</li>
+  <li>Used to rebuild the project hot cache at run end.</li>
+</ul>
+
+<p>
+  If a model omits or mangles the card, <code>DecisionCard.from_response</code>
+  derives a generic one so a run never blocks on a missing field.
+</p>
+
+<h2 id="stages">The six stages</h2>
+
+<h3 id="scout">1. Scout <span class="badge b-draft">model</span></h3>
+
+<p>
+  Scout reads the Atlas and the source folder, frames the question, and
+  produces the project spec. It walks five sub-phases <em>in one
+  turn</em>, using <code>hx_ask</code> for any named, recordable
+  question:
+</p>
+
+<ol>
+  <li><strong>Skip option.</strong> First, asks: "Skip the interview and
+    run full Scout end-to-end?" If accepted, jumps straight to
+    Synthesize + Spec.</li>
+  <li><strong>Frame.</strong> Fills in FINER (<em>Feasible · Interesting
+    · Novel · Ethical · Relevant</em>), PICOT
+    (<em>Population · Intervention · Comparator · Outcome · Time</em>),
+    and GQM (<em>Goal · Questions · Metrics</em>) in the spec
+    frontmatter. Unanswered axes become
+    <code>[NEEDS CLARIFICATION: …]</code> markers in the body —
+    <code>hx_clarify</code> walks them next.</li>
+  <li><strong>Source.</strong> Cross-references the new source files
+    against the existing Atlas (<code>hx_atlas_recall</code>). Each
+    source becomes a <code>sources/&lt;slug&gt;.md</code> write with the
+    full Workstream-G write protocol (action / because / provenance /
+    spec_refs).</li>
+  <li><strong>Lit dive.</strong> Uses WebSearch / WebFetch (and a
+    structured-extraction skill like <code>superpowers</code> if
+    installed) to fill in gaps the sources leave. Seeds the
+    <code>glossary</code> thread with canonical terms.</li>
+  <li><strong>Synthesize → Spec.</strong> Produces 2–3 candidate
+    approaches. Writes the spec at
+    <code>projects/&lt;id&gt;/spec.md</code> with FINER / PICOT / GQM
+    filled in. Sets <code>gate.status: ready</code> only when no
+    clarification markers remain. Before submit, runs
+    <code>hx_question_check</code> — it must report <em>ready</em>.</li>
+</ol>
+
+<p>Output contract (the JSON the agent submits):</p>
+
+<pre><code>{
+  "source_summaries": [{"file": "…", "summary": "…"}],
+  "approaches": [
+    {"id": "approach-1", "title": "…", "description": "…",
+     "feasibility": "high|medium|low"}
+  ],
+  "atlas_writes": [
+    {"path": "sources/&lt;slug&gt;.md", …, "action": "ADD", "because": "…",
+     "provenance": {"stage": "scout", "run_id": "…", "sources": ["…"]},
+     "spec_refs": ["spec:0001:B"]},
+    {"path": "projects/&lt;id&gt;/spec.md", "title": "Spec", "content": "…",
+     "action": "ADD", "because": "Scout final sub-phase",
+     "provenance": {"stage": "scout"}, "spec_refs": ["spec:0001:B"]}
+  ],
+  "decision_card": { … }
+}</code></pre>
+
+<div class="note">
+  <h5>Spec gate</h5>
+  The Scout context builder calls <code>question_check</code> on every
+  pass and surfaces blocker findings inline in the USER prompt, so the
+  agent can iteratively fill in FINER / PICOT / GQM and resolve
+  <code>[NEEDS CLARIFICATION]</code> markers across send-backs.
+</div>
+
+<h3 id="scout-critic">2. Scout Critic <span class="badge b-draft">model</span></h3>
+
+<p>
+  The Scout Critic red-teams Scout's output before the Planner sees it.
+  It produces two things:
+</p>
+
+<ol>
+  <li>A <strong>ranked list of candidate hypotheses</strong>, each
+    scored on three axes — <em>testable · falsifiable · distinct</em> —
+    with a one-line rationale per axis. <em>Distinct</em> means
+    "meaningfully different from the other candidates", not "rephrased".</li>
+  <li>A <strong>Deep-Modules note</strong> for the Planner (Ousterhout
+    bias): for the chosen approach, flags any component the Scout
+    sketched that would be a <em>shallow</em> abstraction (mostly
+    pass-through, high interface surface, low information-hiding) and
+    suggests a deeper alternative.</li>
+</ol>
+
+<p>
+  The critic may also critique the spec itself: unresolved
+  <code>[NEEDS CLARIFICATION]</code> markers prompt a
+  <code>hx_clarify</code> recommendation; visibly thin FINER / PICOT /
+  GQM prompts a Scout send-back recommendation.
+</p>
+
+<p>
+  This stage is also where the <em>idea-tournament</em> ranking lives
+  for the rediscover loop (Workstream H). The ranking is written back
+  to the <code>hypothesis</code> thread; subsequent iterations use the
+  ranked order.
+</p>
+
+<h3 id="planner">3. Planner <span class="badge b-draft">model</span></h3>
+
+<p>
+  The Planner reads the spec and the chosen approach (with the Scout
+  Critic's Deep-Modules note) and writes a concrete validation plan
+  with numeric bands. It is biased to <em>design it twice</em>:
+</p>
+
+<ul>
+  <li>For each non-trivial component, sketch two alternatives and pick
+    the deeper one — high implementation behind a small interface,
+    hides decisions callers don't need.</li>
+  <li>Reject shallow modules (thin pass-throughs, leaky abstractions,
+    large interface for small payoff).</li>
+  <li>Record the rejected alternative + the reason in the
+    <code>alternatives</code> field — that becomes the Rust-RFC
+    <em>Rationale &amp; alternatives</em> section of the report.</li>
+</ul>
+
+<p>
+  Output contract carries
+  <code>plan: {title, objective, steps, success_criteria, validation_bands, alternatives}</code>
+  + the standard atlas_writes + decision_card. The
+  <code>validation_bands</code> is the contract for the deterministic
+  Validator below.
+</p>
+
+<h3 id="builder">4. Builder <span class="badge b-draft">model</span></h3>
+
+<p>
+  The Builder writes runnable code / analysis scripts / structured
+  outputs as <code>artifacts</code>. Each artifact's <code>name</code>
+  is a relative file path (e.g. <code>src/sim.py</code>,
+  <code>tests/test_x.py</code>) sanitised by
+  <code>sandbox.sanitize_code_artifacts</code> and written into the
+  project's <code>artifacts/</code> directory. <strong>Helix never
+  executes the artifacts</strong> — they are written, not run.
+</p>
+
+<p>
+  The Builder also reports metrics that the Validator will check
+  against the Planner's bands.
+</p>
+
+<h3 id="builder-tdd">↳ TDD task loop (F.5)</h3>
+
+<p>
+  The Builder advances <strong>one task at a time</strong> from the
+  Planner's <code>tasks.md</code> (an ordered YAML list of
+  <code>{id, title, deps, acceptance}</code>), test-first. Each
+  <code>hx_submit</code> is one phase of one task:
+</p>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> test : pick next task
+  test --> impl : test phase submitted (failing test present)
+  impl --> refactor : impl phase submitted (test goes green)
+  refactor --> done : refactor phase submitted
+  done --> [*] : pick the next task
+  test --> test : send-back / revision (same phase, same task)
+  impl --> impl : send-back / revision
+  refactor --> refactor : send-back / revision
+</div>
+
+<p>
+  The orchestrator enforces the contract in
+  <code>core.agents._check_tdd_guards</code>:
+</p>
+
+<table>
+  <tr><th>Violation</th><th>Reject reason</th></tr>
+  <tr><td>Batched submission (<code>task_ids</code> list)</td><td>"submit one task at a time"</td></tr>
+  <tr><td>Unknown phase</td><td>"phase must be one of (test, impl, refactor)"</td></tr>
+  <tr><td><code>phase: "test"</code> with no test file in artifacts</td><td>"phase='test' requires at least one test artifact"</td></tr>
+  <tr><td>Phase jump (e.g. test → refactor)</td><td>"expected phase 'impl' next"</td></tr>
+  <tr><td>Repeating a phase</td><td>same as above</td></tr>
+  <tr><td>Submit after refactor</td><td>"task &lt;id&gt; is already done"</td></tr>
+  <tr><td>Test-disabling content (<code>@pytest.mark.skip</code>, <code>@unittest.skip</code>, <code>pytest.skip(…)</code>, <code>@pytest.mark.xfail(strict=False)</code>)</td><td>"artifact … disables a test"</td></tr>
+</table>
+
+<p>
+  A violation cleanly surfaces as <code>StageResult.error</code>; the
+  orchestrator pauses the run resumably and the agent fixes it on
+  re-submit for the same task_id / phase. Legacy submits without a
+  <code>task_id</code> / <code>phase</code> bypass the loop (the
+  guardrail only activates when those fields are present), so the
+  TDD discipline is opt-in per project.
+</p>
+
+<h3 id="validator">5. Validator <span class="badge b-rec">deterministic</span></h3>
+
+<p>
+  The Validator is the only deterministic stage. It calls no model and
+  costs no tokens. It checks each reported metric against the
+  Planner's bands:
+</p>
+
+<pre><code>for result in s.experiment_results:
+    metric, value = result["metric"], result["value"]
+    if metric in bands and value is not None:
+        lo, hi = float(band["min"]), float(band["max"])
+        if not (lo &lt;= float(value) &lt;= hi):
+            flags.append(f"HARD: {metric}={value} outside band [{lo}, {hi}]")</code></pre>
+
+<p>
+  Any <code>HARD:</code> flag routes the run back to the Builder with
+  the flags as feedback (this is one of the deterministic
+  <em>iterate</em> routes — it happens regardless of autonomy). A
+  non-numeric value lodges as a <code>SOFT:</code> flag and the run
+  continues. The Validator's own snapshot still runs through
+  <code>_write_report</code> so there is a Validator HTML report with
+  the hard-flag list.
+</p>
+
+<h3 id="critic-results">6. Results Critic <span class="badge b-draft">model</span></h3>
+
+<p>
+  The Results Critic judges the outcome and returns a structured
+  verdict:
+</p>
+
+<pre><code>{
+  "assessment": "…",
+  "strengths": ["…"],
+  "weaknesses": ["…"],
+  "recommendations": ["…"],
+  "verdict": "ship | iterate | abandon",
+  …
+}</code></pre>
+
+<p>
+  A <code>verdict: "iterate"</code> is the second deterministic route
+  back to Builder (the orchestrator picks this up regardless of
+  autonomy). When artifacts contain code, the critic is instructed to
+  reach for the <code>security-review</code> skill (graceful — use if
+  installed). In the rediscover loop the critic additionally returns a
+  verdict <em>per hypothesis</em>
+  (<code>supported · refuted · inconclusive</code>) and a revised
+  statement carried into the next iteration via the
+  <code>hypothesis</code> thread.
+</p>
+
+<h2 id="reports">Stage HTML reports</h2>
+
+<p>
+  Each stage writes a self-contained HTML file at
+  <code>atlas/projects/&lt;id&gt;/reports/&lt;stage&gt;.html</code>
+  (overwritten each run; history lives in the snapshot DAG). The file
+  is single-file by design — embedded JSON annotation block, inlined
+  CSS + JS overlay, no external runtime — so it can travel by email
+  or be opened from a USB drive.
+</p>
+
+<table>
+  <tr><th>Stage</th><th>Template shape</th></tr>
+  <tr><td>Scout</td><td>IMRaD + PRISMA flow</td></tr>
+  <tr><td>Scout Critic</td><td>Blameless PIR with hypothesis rankings + Deep-Modules note</td></tr>
+  <tr><td>Planner</td><td>Rust RFC (Motivation · Design · <em>Rationale &amp; alternatives</em>)</td></tr>
+  <tr><td>Builder</td><td>MADR + PR-checklist</td></tr>
+  <tr><td>Validator</td><td>IMRaD-Methods/Results with HARD-flag list</td></tr>
+  <tr><td>Results Critic</td><td>Blameless PIR + verdict</td></tr>
+</table>
+
+<p>
+  The annotation overlay supports four researcher actions per critic
+  note (<em>Accept · Reject · Reply · Send back ↩</em>) plus
+  <em>Add comment</em>. Save the modified file in place (File System
+  Access API on Chromium; Download fallback elsewhere), then ask the
+  agent to <em>send back the &lt;stage&gt; report</em> — Helix runs
+  <code>hx_report_send_back</code>, parses the embedded annotations,
+  and threads the feedback into the next pass of that stage.
+</p>
+
+<h2 id="constitution">Constitution &amp; spec</h2>
+
+<p>
+  Two pieces of context every agent reads on every turn:
+</p>
+
+<ul>
+  <li><strong>Constitution</strong> — workspace-level non-negotiables
+    at <code>&lt;workspace&gt;/constitution.md</code>. Loaded by
+    <code>core.agents.load_agent</code> and appended to every agent's
+    system prompt. Per-project override at
+    <code>&lt;project&gt;/constitution.md</code> wins if present. Edit
+    it to set language / framework / testing / style / definition of
+    "done". (Spec §F.1)</li>
+  <li><strong>Spec</strong> — per-project at
+    <code>atlas/projects/&lt;id&gt;/spec.md</code>. YAML frontmatter
+    <code>{finer, picot, gqm, datasets, open_questions, gate}</code>
+    + free-form markdown body. Scout owns initial authorship;
+    <code>hx_clarify</code> walks unresolved markers; every later stage
+    reads it. (Spec §B + F.2/F.3)</li>
+</ul>
+
+<h2 id="authoring">Authoring a custom agent</h2>
+
+<p>Override any stage for a project by dropping a markdown file at:</p>
+
+<pre><code>&lt;project&gt;/agents/&lt;stage&gt;.md</code></pre>
+
+<p>The shape:</p>
+
+<pre><code>---
+name: scout                       # must match the stage name
+order: 1                          # determines pipeline position
+kind: llm                         # llm | deterministic
+model_stage: scout                # ModelConfig routing key
+atlas_write: true                 # may emit atlas_writes
+snapshot: after                   # when the snapshot is minted
+---
+You are a research scout. [system prompt body]
+
+Respond with JSON:
+{ … your output contract … }</code></pre>
+
+<p>
+  Three concrete rules:
+</p>
+
+<ol>
+  <li><strong>Reuse the Decision Card shape</strong> as the last field
+    of your output. Otherwise the snapshot stores a generic card.</li>
+  <li><strong>Adopt the Workstream-G write protocol</strong>
+    (<code>action · because · provenance · spec_refs</code>) when you
+    emit <code>atlas_writes</code>. The sanitizer will compat-default
+    missing fields, but the orphan-by-policy lint will flag unspec'd
+    writes.</li>
+  <li><strong>If you change a context builder</strong>
+    (<code>core.agents._ctx_&lt;stage&gt;</code>) or response mapper
+    (<code>_map_&lt;stage&gt;</code>), keep the function pure on
+    (<code>state</code>, <code>ctx</code>) → string for context, and
+    on (<code>response_json</code>, <code>state</code>,
+    <code>ctx</code>) → dict-of-updates for the map. Raising
+    <code>AgentInputError</code> from the map cleanly produces a
+    <code>StageResult.error</code> and the existing send-back path
+    picks it up.</li>
+</ol>
+
+<p>
+  See <a href="gates.html">Gates &amp; control</a> for how the
+  Plan governs autonomy at each transition, and how send-back routes
+  back through this pipeline.
+</p>
+
+</main>
+</div>
+
+<footer class="site">
+  <a href="usage.html">← Usage</a> &nbsp;·&nbsp;
+  <a href="gates.html">Gates →</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="assets/mermaid-init.js"></script>
+</body>
+</html>

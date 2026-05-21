@@ -15,7 +15,7 @@ def test_full_card_parsed():
         "open_questions": [],
         "directive_for_next": "validate A",
         "confidence": "HIGH",
-    }}, "critic_methods")
+    }}, "scout_critic")
     assert c.summary == "Picked approach A."
     assert c.key_findings == ["f1", "f2"]
     assert c.directive_for_next == "validate A"

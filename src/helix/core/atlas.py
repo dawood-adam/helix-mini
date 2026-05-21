@@ -50,6 +50,11 @@ class PageMeta:
     provenance: dict = field(default_factory=dict)
     links: dict = field(default_factory=_empty_links)
     embeddings: dict = field(default_factory=dict)
+    # Workstream G — write-protocol fields persisted in frontmatter so the
+    # spec cross-reference survives a page round-trip (and the
+    # orphan-by-policy lint can see them).
+    spec_refs: list[str] = field(default_factory=list)
+    history: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict) -> PageMeta:
@@ -59,6 +64,8 @@ class PageMeta:
             for k, v in d["links"].items():
                 links[k] = list(v) if isinstance(v, list) else links.get(k, [])
         al = d.get("aliases")
+        refs = d.get("spec_refs")
+        hist = d.get("history")
         return cls(
             id=str(d.get("id", "")),
             type=d["type"] if d.get("type") in TYPES else "concept",
@@ -71,6 +78,8 @@ class PageMeta:
             provenance=d.get("provenance") if isinstance(d.get("provenance"), dict) else {},
             links=links,
             embeddings=d.get("embeddings") if isinstance(d.get("embeddings"), dict) else {},
+            spec_refs=[str(r) for r in refs] if isinstance(refs, list) else [],
+            history=[h for h in hist if isinstance(h, dict)] if isinstance(hist, list) else [],
         )
 
 
@@ -93,6 +102,15 @@ class PageWrite:
     aliases: list[str] | None = None
     tier: str | None = None
     links: dict | None = None
+    # Workstream G — write protocol fields. ``action`` is the closed-set
+    # vocabulary (ADD/UPDATE/SUPERSEDE/LINK/NOOP); ``because`` is a
+    # one-line rationale; ``provenance`` carries the stage/run/snap
+    # context the sanitizer enforces; ``spec_refs`` records which spec
+    # line(s) this write supports/contradicts/extends.
+    action: str | None = None
+    because: str | None = None
+    provenance: dict | None = None
+    spec_refs: list[str] | None = None
 
 
 def _split_frontmatter(text: str) -> tuple[dict, str]:
@@ -247,6 +265,36 @@ class Atlas:
             for k, v in w.links.items():
                 if k in links and isinstance(v, list):
                     links[k] = [str(x) for x in v]
+        # Workstream G — merge the write's provenance (stage / run_id /
+        # snapshot_id / sources / confidence) into the page's, preserving
+        # any prior keys we don't overwrite. Then append the action /
+        # because / spec_refs to a short history list so we keep a
+        # per-page audit trail without bloating the frontmatter.
+        prior_prov = prior.get("provenance") if isinstance(
+            prior.get("provenance"), dict) else {}
+        prov = dict(prior_prov)
+        if isinstance(w.provenance, dict):
+            prov.update(w.provenance)
+        prior_refs = prior.get("spec_refs") if isinstance(
+            prior.get("spec_refs"), list) else []
+        merged_refs = list(dict.fromkeys(
+            [str(r) for r in prior_refs] + [str(r) for r in (w.spec_refs or [])]))
+        prior_hist = prior.get("history") if isinstance(
+            prior.get("history"), list) else []
+        history = [h for h in prior_hist if isinstance(h, dict)]
+        entry = {"at": now}
+        if w.action:
+            entry["action"] = w.action
+        if w.because:
+            entry["because"] = w.because
+        if w.spec_refs:
+            entry["spec_refs"] = [str(r) for r in w.spec_refs]
+        run_id = prov.get("run_id") if isinstance(prov, dict) else None
+        if run_id:
+            entry["run_id"] = run_id
+        if len(entry) > 1:  # don't append a timestamp-only no-op
+            history.append(entry)
+            history = history[-20:]  # cap so a chatty stage can't bloat frontmatter
         return PageMeta(
             id=_page_id(w.path),
             type=w.type if w.type in TYPES else _DIR_TYPE.get(
@@ -257,11 +305,12 @@ class Atlas:
             updated_at=now,
             claim_valid_at=str(prior.get("claim_valid_at") or now),
             last_verified_at=now,
-            provenance=prior.get("provenance") if isinstance(
-                prior.get("provenance"), dict) else {},
+            provenance=prov,
             links=links,
             embeddings=prior.get("embeddings") if isinstance(
                 prior.get("embeddings"), dict) else {},
+            spec_refs=merged_refs,
+            history=history,
         )
 
     def _update_index(self, writes: list[PageWrite]) -> None:
@@ -307,6 +356,7 @@ def _meta_dict(m: PageMeta) -> dict:
         "created_at": m.created_at, "updated_at": m.updated_at,
         "claim_valid_at": m.claim_valid_at, "last_verified_at": m.last_verified_at,
         "provenance": m.provenance, "links": m.links, "embeddings": m.embeddings,
+        "spec_refs": m.spec_refs, "history": m.history,
     }
 
 

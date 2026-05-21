@@ -34,6 +34,34 @@ def _project_dir(atlas: Atlas, project: str) -> Path:
     return d
 
 
+def _write_report(state, atlas: Atlas, project: str, stage: str,
+                  snapshot_id, result) -> None:
+    """Workstream D: write the stage's self-contained HTML report.
+
+    One canonical file per stage (overwritten on each (re-)run); the
+    annotation overlay lives inside the same file (W3C Web Annotation
+    Data Model — spec §D-3). Stale annotations from a prior run are
+    already captured into the next-run feedback by
+    ``hx_report_send_back`` before re-rendering, so it's safe to
+    overwrite here."""
+    from ..core import reports as _reports
+
+    reports_dir = _project_dir(atlas, project) / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    flags = state.sanity_check_flags or []
+    rctx = _reports.ReportContext(
+        verdict=state.verdict or "",
+        flags=[str(f) for f in flags] if flags else [],
+        threads_touched=[],   # Workstream E will populate
+        spec_refs=[],         # Workstream F will populate
+    )
+    html_str = _reports.render_report(
+        result.card, stage, project,
+        snapshot_id=snapshot_id, ctx=rctx, annotations=[],
+    )
+    (reports_dir / f"{stage}.html").write_text(html_str)
+
+
 def _decisions_path(atlas: Atlas, project: str) -> Path:
     return _project_dir(atlas, project) / ".decisions.json"
 
@@ -100,6 +128,14 @@ def advance(
         parent=last_id, branch=branch,
     )
 
+    # Workstream D: emit / overwrite the per-stage HTML report (latest only;
+    # history lives in the snapshot DAG). Best-effort — a renderer failure
+    # never breaks a run, just logs and skips.
+    try:
+        _write_report(state, atlas, project, current, meta["id"], result)
+    except Exception as e:  # noqa: BLE001 - non-fatal by design
+        log.warning("report renderer failed for %s: %s", current, e)
+
     gate = decide_gate(
         state, current, result.decision, result.rationale,
         ask=ask, interactive=interactive, plan=plan,
@@ -107,6 +143,18 @@ def advance(
     nxt = next_stage(current, gate)
     if nxt == "builder" and "builder" in state.completed_stages:
         state.build_iterations += 1
+    # Workstream H — rediscover loop. After Results Critic in
+    # ``autonomy_until: "rediscover"`` mode, restart from Scout with the
+    # hypothesis thread carried forward; capped at H.REDISCOVER_CAP.
+    if nxt == END and current == "critic_results":
+        from .. import core
+        from ..core import hypothesis as _hyp
+
+        if plan is not None and _hyp.should_loop_again(state, plan):
+            nxt = "scout"
+            log.info("rediscover: looping from critic_results → scout "
+                     "(iteration %d of %d)",
+                     _hyp.iterations_so_far(state), _hyp.REDISCOVER_CAP)
     return nxt, meta["id"]
 
 
